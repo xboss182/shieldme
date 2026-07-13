@@ -1,0 +1,4 @@
+Contact: mailto:security@shieldme.cc
+Policy: https://shieldme.cc/security
+Preferred-Languages: en
+Canonical: https://shieldme.cc/.well-known/security.txt
