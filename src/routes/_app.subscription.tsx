@@ -9,9 +9,11 @@ import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/_app/subscription")({ component: SubscriptionPage });
 
-const PLAN_ORDER: AccountPlan[] = ["free", "basic", "pro"];
+type DisplayPlan = Exclude<AccountPlan, "business">;
 
-const FALLBACK_LIMITS: Record<AccountPlan, PlanLimits> = {
+const PLAN_ORDER: DisplayPlan[] = ["free", "basic", "pro"];
+
+const FALLBACK_LIMITS: Record<DisplayPlan, PlanLimits> = {
   free: {
     maxDomains: 1,
     maxAliases: 10,
@@ -42,7 +44,7 @@ const FALLBACK_LIMITS: Record<AccountPlan, PlanLimits> = {
 };
 
 const PLAN_COPY: Record<
-  AccountPlan,
+  DisplayPlan,
   {
     name: string;
     eyebrow: string;
@@ -84,7 +86,7 @@ const PLAN_COPY: Record<
   },
 };
 
-function featuresFor(plan: AccountPlan) {
+function featuresFor(plan: DisplayPlan) {
   const sharedFeatures = [
     { label: "Instant alias blocking", included: true },
     { label: "Works with any inbox", included: true },
@@ -235,7 +237,7 @@ function PlanCard({
   plan,
   summary,
 }: {
-  plan: AccountPlan;
+  plan: DisplayPlan;
   limits: PlanLimits;
   summary?: PlanSummary;
 }) {

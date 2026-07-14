@@ -9,8 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as V2RouteImport } from './routes/v2'
-import { Route as UpgradesRouteImport } from './routes/upgrades'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as MailSecurityRouteImport } from './routes/mail-security'
@@ -28,16 +26,6 @@ import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
 import { Route as AppAliasesRouteImport } from './routes/_app.aliases'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 
-const V2Route = V2RouteImport.update({
-  id: '/v2',
-  path: '/v2',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const UpgradesRoute = UpgradesRouteImport.update({
-  id: '/upgrades',
-  path: '/upgrades',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SecurityRoute = SecurityRouteImport.update({
   id: '/security',
   path: '/security',
@@ -122,8 +110,6 @@ export interface FileRoutesByFullPath {
   '/mail-security': typeof MailSecurityRoute
   '/privacy': typeof PrivacyRoute
   '/security': typeof SecurityRoute
-  '/upgrades': typeof UpgradesRoute
-  '/v2': typeof V2Route
   '/admin': typeof AppAdminRoute
   '/aliases': typeof AppAliasesRoute
   '/dashboard': typeof AppDashboardRoute
@@ -140,8 +126,6 @@ export interface FileRoutesByTo {
   '/mail-security': typeof MailSecurityRoute
   '/privacy': typeof PrivacyRoute
   '/security': typeof SecurityRoute
-  '/upgrades': typeof UpgradesRoute
-  '/v2': typeof V2Route
   '/admin': typeof AppAdminRoute
   '/aliases': typeof AppAliasesRoute
   '/dashboard': typeof AppDashboardRoute
@@ -161,8 +145,6 @@ export interface FileRoutesById {
   '/mail-security': typeof MailSecurityRoute
   '/privacy': typeof PrivacyRoute
   '/security': typeof SecurityRoute
-  '/upgrades': typeof UpgradesRoute
-  '/v2': typeof V2Route
   '/_app/admin': typeof AppAdminRoute
   '/_app/aliases': typeof AppAliasesRoute
   '/_app/dashboard': typeof AppDashboardRoute
@@ -181,8 +163,6 @@ export interface FileRouteTypes {
     | '/mail-security'
     | '/privacy'
     | '/security'
-    | '/upgrades'
-    | '/v2'
     | '/admin'
     | '/aliases'
     | '/dashboard'
@@ -199,8 +179,6 @@ export interface FileRouteTypes {
     | '/mail-security'
     | '/privacy'
     | '/security'
-    | '/upgrades'
-    | '/v2'
     | '/admin'
     | '/aliases'
     | '/dashboard'
@@ -219,8 +197,6 @@ export interface FileRouteTypes {
     | '/mail-security'
     | '/privacy'
     | '/security'
-    | '/upgrades'
-    | '/v2'
     | '/_app/admin'
     | '/_app/aliases'
     | '/_app/dashboard'
@@ -240,26 +216,10 @@ export interface RootRouteChildren {
   MailSecurityRoute: typeof MailSecurityRoute
   PrivacyRoute: typeof PrivacyRoute
   SecurityRoute: typeof SecurityRoute
-  UpgradesRoute: typeof UpgradesRoute
-  V2Route: typeof V2Route
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/v2': {
-      id: '/v2'
-      path: '/v2'
-      fullPath: '/v2'
-      preLoaderRoute: typeof V2RouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/upgrades': {
-      id: '/upgrades'
-      path: '/upgrades'
-      fullPath: '/upgrades'
-      preLoaderRoute: typeof UpgradesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/security': {
       id: '/security'
       path: '/security'
@@ -418,8 +378,6 @@ const rootRouteChildren: RootRouteChildren = {
   MailSecurityRoute: MailSecurityRoute,
   PrivacyRoute: PrivacyRoute,
   SecurityRoute: SecurityRoute,
-  UpgradesRoute: UpgradesRoute,
-  V2Route: V2Route,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

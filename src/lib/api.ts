@@ -163,9 +163,15 @@ export interface AdminStats {
   totals: Record<string, number>;
   active: Record<string, number>;
   suspended: Record<string, number>;
-  deliveries: Array<{ status: string; window: string; count: number }>;
+  deliveries: Array<{ status: string; window: string; count: number }> & {
+    pgpEncrypted?: number;
+  };
   pgpEncryptedDeliveries: number;
-  queueDepth: Record<string, number>;
+  queueDepth: Record<string, number> | number;
+  users?: { total: number };
+  domains?: { total: number };
+  aliases?: { total: number };
+  queue?: { depth: number };
 }
 export interface AdminUser {
   id: string;
@@ -221,6 +227,9 @@ export interface AdminDelivery {
   sizeBytes?: number | null;
   createdAt: string;
   updatedAt: string;
+  alias?: string;
+  recipient?: string;
+  pgpMode?: string | null;
 }
 
 export interface FailedDelivery {
