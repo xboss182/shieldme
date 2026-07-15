@@ -16,10 +16,10 @@ const PLAN_ORDER: DisplayPlan[] = ["free", "basic", "pro"];
 const FALLBACK_LIMITS: Record<DisplayPlan, PlanLimits> = {
   free: {
     maxDomains: 1,
-    maxAliases: 10,
+    maxAliases: 5,
     maxRecipients: 1,
-    monthlyForwards: 1000,
-    pgpEnabled: true,
+    monthlyForwards: 100,
+    pgpEnabled: false,
     customOutboundProvider: false,
     billingEnabled: false,
   },
@@ -27,16 +27,16 @@ const FALLBACK_LIMITS: Record<DisplayPlan, PlanLimits> = {
     maxDomains: 3,
     maxAliases: 50,
     maxRecipients: 5,
-    monthlyForwards: 5000,
-    pgpEnabled: true,
+    monthlyForwards: 2_000,
+    pgpEnabled: false,
     customOutboundProvider: false,
     billingEnabled: true,
   },
   pro: {
-    maxDomains: 5,
-    maxAliases: 1000000,
-    maxRecipients: 25,
-    monthlyForwards: 10000,
+    maxDomains: 3,
+    maxAliases: 500,
+    maxRecipients: 5,
+    monthlyForwards: 20_000,
     pgpEnabled: true,
     customOutboundProvider: false,
     billingEnabled: true,
@@ -86,31 +86,36 @@ const PLAN_COPY: Record<
   },
 };
 
-function featuresFor(plan: DisplayPlan) {
+function featuresFor(plan: DisplayPlan, limits: PlanLimits) {
   const sharedFeatures = [
     { label: "Instant alias blocking", included: true },
     { label: "Works with any inbox", included: true },
-    { label: "OpenPGP encrypted forwarding", included: true },
   ];
-  if (plan === "free")
-    return [
-      { label: "10 active aliases", included: true },
-      { label: "1 custom domain", included: true },
-      { label: "1 recipient", included: true },
-      ...sharedFeatures,
-    ];
+  const entitlementFeatures = [
+    { label: `${limits.maxAliases.toLocaleString()} active aliases`, included: true },
+    {
+      label: `${limits.maxDomains} custom domain${limits.maxDomains === 1 ? "" : "s"}`,
+      included: true,
+    },
+    {
+      label: `${limits.maxRecipients} recipient${limits.maxRecipients === 1 ? "" : "s"}`,
+      included: true,
+    },
+  ];
+  const pgpFeature = limits.pgpEnabled
+    ? [{ label: "OpenPGP encrypted forwarding", included: true }]
+    : [];
+  if (plan === "free") return [...entitlementFeatures, ...pgpFeature, ...sharedFeatures];
   if (plan === "basic")
     return [
-      { label: "50 active aliases", included: true },
-      { label: "3 custom domains", included: true },
-      { label: "5 recipients", included: true },
+      ...entitlementFeatures,
+      ...pgpFeature,
       ...sharedFeatures,
       { label: "Email customer support", included: true },
     ];
   return [
-    { label: "Unlimited active aliases", included: true },
-    { label: "5 custom domains", included: true },
-    { label: "15 recipients", included: true },
+    ...entitlementFeatures,
+    ...pgpFeature,
     ...sharedFeatures,
     { label: "Chat customer support", included: true },
   ];
@@ -235,6 +240,7 @@ export function SubscriptionPage() {
 
 function PlanCard({
   plan,
+  limits,
   summary,
 }: {
   plan: DisplayPlan;
@@ -243,6 +249,7 @@ function PlanCard({
 }) {
   const copy = PLAN_COPY[plan];
   const isCurrent = (summary?.plan ?? "free") === plan;
+  const features = featuresFor(plan, limits);
   return (
     <Card
       className={cn(
@@ -274,7 +281,7 @@ function PlanCard({
         <div className="mt-1 text-sm text-muted-foreground">{copy.note}</div>
         <p className="mt-4 min-h-12 text-sm leading-6 text-muted-foreground">{copy.description}</p>
         <div className="mt-5 flex-1 space-y-3 text-sm">
-          {featuresFor(plan).map((feature) => (
+          {features.map((feature) => (
             <div
               key={feature.label}
               className={cn(
