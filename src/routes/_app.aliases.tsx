@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
+import { createAliasPayload } from "../lib/alias-create-payload";
 import {
   aliasesApi,
   aliasesPgpApi,
@@ -147,6 +148,7 @@ function CreateAliasDialog() {
   const [open, setOpen] = useState(false);
   const [serviceLabel, setServiceLabel] = useState("");
   const [localPart, setLocalPart] = useState("");
+  const [localPartEdited, setLocalPartEdited] = useState(false);
   const [generatedPreview, setGeneratedPreview] = useState("");
   const [domainId, setDomainId] = useState("");
   const [recipientId, setRecipientId] = useState("");
@@ -162,13 +164,16 @@ function CreateAliasDialog() {
   const recipients = (recData?.recipients ?? []).filter((r) => r.status === "verified");
   const mut = useMutation({
     mutationFn: () =>
-      aliasesApi.create({
-        serviceLabel: serviceLabel.trim() || undefined,
-        localPart: localPart.trim() || generatedPreview || undefined,
-        domainId,
-        recipientId,
-        pgpMode,
-      }),
+      aliasesApi.create(
+        createAliasPayload({
+          serviceLabel,
+          localPart,
+          localPartEdited,
+          domainId,
+          recipientId,
+          pgpMode,
+        }),
+      ),
     onSuccess: (data) => {
       if (pgpMode !== "none") {
         aliasesPgpApi.setPgpMode(data.alias.id, pgpMode).catch(() => {});
@@ -178,6 +183,7 @@ function CreateAliasDialog() {
       setOpen(false);
       setServiceLabel("");
       setLocalPart("");
+      setLocalPartEdited(false);
       setGeneratedPreview("");
       setDomainId("");
       setRecipientId("");
@@ -244,7 +250,11 @@ function CreateAliasDialog() {
                   size="sm"
                   variant="outline"
                   className="gap-1.5"
-                  onClick={() => setGeneratedPreview(previewAliasLocalPart(serviceLabel))}
+                  onClick={() => {
+                    setGeneratedPreview(previewAliasLocalPart(serviceLabel));
+                    setLocalPart("");
+                    setLocalPartEdited(false);
+                  }}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
                   {generatedPreview ? "Regenerate" : "Preview"}
@@ -259,7 +269,10 @@ function CreateAliasDialog() {
             <Input
               placeholder="netflix-a1b2c3d4e5"
               value={localPart}
-              onChange={(e) => setLocalPart(e.target.value.toLowerCase())}
+              onChange={(e) => {
+                setLocalPart(e.target.value.toLowerCase());
+                setLocalPartEdited(true);
+              }}
             />
             <p className="text-xs text-muted-foreground">
               Edit the generated alias or leave blank to use a cryptographic suffix.
