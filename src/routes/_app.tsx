@@ -58,6 +58,7 @@ function AppLayout() {
         <div className="fixed inset-0 z-20 bg-black/50 lg:hidden" onClick={() => setOpen(false)} />
       )}
       <aside
+        id="app-navigation"
         className={cn(
           "fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-border bg-surface transition-transform lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
@@ -104,6 +105,9 @@ function AppLayout() {
           <button
             onClick={() => setOpen(true)}
             className="text-muted-foreground hover:text-foreground"
+            aria-label="Open navigation"
+            aria-expanded={open}
+            aria-controls="app-navigation"
           >
             <Menu className="h-5 w-5" />
           </button>
