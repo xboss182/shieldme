@@ -1,0 +1,16 @@
+# ShieldMe mail security DNS reference
+
+This playbook intentionally does not mutate DNS. Add records with the DNS provider after review.
+
+| Purpose | Host | Type | Example value |
+|---|---|---|---|
+| SPF | shieldme.cc | TXT | v=spf1 include:amazonses.com include:spf.resend.com -all |
+| DKIM | {{ shieldme_env_template.DKIM_SELECTOR }}._domainkey.shieldme.cc | TXT/CNAME | Provider-supplied DKIM value |
+| DMARC | _dmarc.shieldme.cc | TXT | v=DMARC1; p=quarantine; rua=mailto:dmarc@shieldme.cc; ruf=mailto:dmarc@shieldme.cc; adkim=s; aspf=s |
+| MTA-STS policy | {{ caddy_sites.mta_sts_domain }} | A/AAAA/CNAME | Points to the Caddy host |
+| MTA-STS TXT | _mta-sts.shieldme.cc | TXT | v=STSv1; id=YYYYMMDDHHMM |
+| TLS-RPT | _smtp._tls.shieldme.cc | TXT | v=TLSRPTv1; rua=mailto:tls-rpt@shieldme.cc |
+| CAA | shieldme.cc | CAA | 0 issue "letsencrypt.org" |
+| MX | shieldme.cc | MX | 10 mail.shieldme.cc. |
+
+Begin with monitoring/report-only policies where appropriate, then tighten after reports are clean.

@@ -1,0 +1,21 @@
+---
+- name: Ensure Caddy snippets directory
+  ansible.builtin.file:
+    path: /etc/caddy/conf.d
+    state: directory
+    owner: root
+    group: caddy
+    mode: '0755'
+
+- name: Install ShieldMe Caddy site blocks
+  ansible.builtin.template:
+    src: shieldme.caddy.j2
+    dest: /etc/caddy/conf.d/shieldme.caddy
+    owner: root
+    group: caddy
+    mode: '0644'
+  notify: reload caddy
+
+- name: Validate generated ShieldMe Caddy snippet
+  ansible.builtin.command: caddy validate --config /etc/caddy/conf.d/shieldme.caddy
+  changed_when: false

@@ -1,0 +1,43 @@
+---
+- name: Ensure ShieldMe group
+  ansible.builtin.group:
+    name: "{{ shieldme_system_group }}"
+    system: true
+
+- name: Ensure ShieldMe system user
+  ansible.builtin.user:
+    name: "{{ shieldme_system_user }}"
+    group: "{{ shieldme_system_group }}"
+    system: true
+    create_home: true
+    home: /home/{{ shieldme_system_user }}
+    shell: /usr/sbin/nologin
+
+- name: Ensure deployment directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(shieldme_system_user) }}"
+    group: "{{ item.group | default(shieldme_system_group) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "{{ shieldme_api_path }}", owner: root, group: root }
+    - { path: "{{ shieldme_site_path }}" }
+    - { path: "{{ shieldme_security_root }}" }
+
+- name: Install PM2 ecosystem template
+  ansible.builtin.template:
+    src: ecosystem.config.cjs.j2
+    dest: "{{ shieldme_api_path }}/ecosystem.config.cjs"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart shieldme pm2 apps
+
+- name: Install example environment file without secrets
+  ansible.builtin.template:
+    src: env.example.j2
+    dest: "{{ shieldme_api_path }}/.env.ansible.example"
+    owner: root
+    group: "{{ shieldme_system_group }}"
+    mode: '0640'

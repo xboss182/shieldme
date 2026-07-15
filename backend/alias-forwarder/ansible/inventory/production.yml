@@ -1,0 +1,10 @@
+---
+all:
+  children:
+    shieldme_vps:
+      hosts:
+        shieldme-primary:
+          # Replace placeholders before running against production.
+          ansible_host: 152.42.211.146
+          ansible_user: root
+          ansible_port: 22

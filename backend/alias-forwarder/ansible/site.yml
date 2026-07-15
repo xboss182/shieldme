@@ -1,0 +1,17 @@
+---
+- name: ShieldMe primary VPS baseline
+  hosts: shieldme_vps
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: base_os
+      tags: [base, hardening]
+    - role: runtime_deps
+      tags: [runtime]
+    - role: shieldme_app
+      tags: [app, pm2]
+    - role: caddy
+      tags: [caddy]
+    - role: mail_security
+      tags: [mail, dns]
