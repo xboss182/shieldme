@@ -23,9 +23,9 @@ CREATE TABLE "aliases" (
 	"recipient_id" uuid NOT NULL,
 	"local_part" text NOT NULL,
 	"status" "alias_status" DEFAULT 'active' NOT NULL,
-	"pgp_mode" "pgp_mode" DEFAULT 'none' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"pgp_mode" "pgp_mode" DEFAULT 'none' NOT NULL,
 	CONSTRAINT "aliases_local_part_domain_id_unique" UNIQUE("local_part","domain_id")
 );
 --> statement-breakpoint
@@ -75,23 +75,23 @@ CREATE TABLE "mail_logs" (
 	"forwarded_to" text,
 	"external_message_id" text,
 	"resend_message_id" text,
-	"outbound_provider" text,
-	"failure_type" text,
-	"failure_reason" text,
-	"tracking_protection" jsonb,
-	"pgp_mode_used" "pgp_mode" DEFAULT 'none' NOT NULL,
-	"pgp_encrypted" boolean DEFAULT false NOT NULL,
 	"status" "mail_log_status" DEFAULT 'queued' NOT NULL,
 	"rejection_reason" text,
 	"size_bytes" integer,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"pgp_mode_used" "pgp_mode" DEFAULT 'none' NOT NULL,
+	"pgp_encrypted" boolean DEFAULT false NOT NULL,
 	"auth_results" jsonb,
 	"auth_failure_count" integer DEFAULT 0 NOT NULL,
 	"spam_scan" jsonb,
 	"spam_score" integer DEFAULT 0 NOT NULL,
 	"spam_category" text,
 	"spam_action" text,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"outbound_provider" text,
+	"failure_type" text,
+	"failure_reason" text,
+	"tracking_protection" jsonb
 );
 --> statement-breakpoint
 CREATE TABLE "pgp_keys" (
@@ -169,15 +169,15 @@ CREATE TABLE "users" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"email" text NOT NULL,
 	"password_hash" text NOT NULL,
-	"role" "user_role" DEFAULT 'user' NOT NULL,
-	"plan" "account_plan" DEFAULT 'free' NOT NULL,
 	"refresh_token_hash" text,
-	"failed_login_attempts" integer DEFAULT 0 NOT NULL,
-	"locked_until" timestamp with time zone,
-	"last_login_at" timestamp with time zone,
 	"is_active" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"role" "user_role" DEFAULT 'user' NOT NULL,
+	"failed_login_attempts" integer DEFAULT 0 NOT NULL,
+	"locked_until" timestamp with time zone,
+	"last_login_at" timestamp with time zone,
+	"plan" "account_plan" DEFAULT 'free' NOT NULL,
 	CONSTRAINT "users_email_unique" UNIQUE("email")
 );
 --> statement-breakpoint

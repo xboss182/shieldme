@@ -19,6 +19,14 @@ describe('canonical production baseline', () => {
     expect(baseline).toContain('WHERE "reserved_local_parts"."domain_id" is not null');
   });
 
+  it('preserves production physical column order', () => {
+    const table = (name: string) => baseline.match(new RegExp(`CREATE TABLE "${name}" \\(([\\s\\S]*?)\\n\\);`))?.[1] ?? '';
+
+    expect(table('aliases')).toMatch(/"status"[\s\S]*"created_at"[\s\S]*"updated_at"[\s\S]*"pgp_mode"/);
+    expect(table('mail_logs')).toMatch(/"resend_message_id"[\s\S]*"status"[\s\S]*"rejection_reason"[\s\S]*"size_bytes"[\s\S]*"created_at"[\s\S]*"updated_at"[\s\S]*"pgp_mode_used"[\s\S]*"pgp_encrypted"[\s\S]*"auth_results"[\s\S]*"auth_failure_count"[\s\S]*"spam_scan"[\s\S]*"spam_score"[\s\S]*"spam_category"[\s\S]*"spam_action"[\s\S]*"outbound_provider"[\s\S]*"failure_type"[\s\S]*"failure_reason"[\s\S]*"tracking_protection"/);
+    expect(table('users')).toMatch(/"password_hash"[\s\S]*"refresh_token_hash"[\s\S]*"is_active"[\s\S]*"created_at"[\s\S]*"updated_at"[\s\S]*"role"[\s\S]*"failed_login_attempts"[\s\S]*"locked_until"[\s\S]*"last_login_at"[\s\S]*"plan"/);
+  });
+
   it('materializes the empty Drizzle migration ledger', () => {
     expect(baseline).toContain('CREATE SCHEMA "drizzle"');
     expect(baseline).toMatch(/CREATE TABLE "drizzle"\."__drizzle_migrations" \([\s\S]*?"id" serial PRIMARY KEY NOT NULL,[\s\S]*?"hash" text NOT NULL,[\s\S]*?"created_at" bigint/);
