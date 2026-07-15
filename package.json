@@ -9,6 +9,8 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
+    "test": "node --test tests/*.test.ts",
+    "test:alias-payload": "node --test tests/alias-create-payload.test.ts",
     "format": "prettier --write ."
   },
   "dependencies": {

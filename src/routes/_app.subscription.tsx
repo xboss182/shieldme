@@ -1,15 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, CreditCard, Lock, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, CreditCard, Lock, ShieldCheck } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { plansApi, type AccountPlan, type PlanLimits, type PlanSummary } from "../lib/api";
+import { PLAN_DISPLAY, type DisplayPlan } from "../lib/plan-display";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/_app/subscription")({ component: SubscriptionPage });
-
-type DisplayPlan = Exclude<AccountPlan, "business">;
 
 const PLAN_ORDER: DisplayPlan[] = ["free", "basic", "pro"];
 
@@ -33,9 +32,9 @@ const FALLBACK_LIMITS: Record<DisplayPlan, PlanLimits> = {
     billingEnabled: true,
   },
   pro: {
-    maxDomains: 5,
-    maxAliases: 1000000,
-    maxRecipients: 25,
+    maxDomains: 3,
+    maxAliases: 500,
+    maxRecipients: 5,
     monthlyForwards: 10000,
     pgpEnabled: true,
     customOutboundProvider: false,
@@ -43,78 +42,6 @@ const FALLBACK_LIMITS: Record<DisplayPlan, PlanLimits> = {
   },
 };
 
-const PLAN_COPY: Record<
-  DisplayPlan,
-  {
-    name: string;
-    eyebrow: string;
-    price: string;
-    period: string;
-    note: string;
-    description: string;
-    cta: string;
-    featured?: boolean;
-  }
-> = {
-  free: {
-    name: "Free",
-    eyebrow: "Starter privacy",
-    price: "$0",
-    period: "Free forever",
-    note: "Try it risk-free",
-    description: "Start shielding your real inbox with core alias protection.",
-    cta: "Start Free",
-  },
-  basic: {
-    name: "Basic",
-    eyebrow: "Personal",
-    price: "$4",
-    period: "/year",
-    note: "About a cent a day",
-    description: "A full year of protection with 3 custom domains.",
-    cta: "Get Basic",
-  },
-  pro: {
-    name: "Shield",
-    eyebrow: "Best value",
-    price: "$10",
-    period: "/year",
-    note: "Under $1/month",
-    description: "Apex plan with higher capacity and priority controls.",
-    cta: "Protect My Inbox",
-    featured: true,
-  },
-};
-
-function featuresFor(plan: DisplayPlan) {
-  const sharedFeatures = [
-    { label: "Instant alias blocking", included: true },
-    { label: "Works with any inbox", included: true },
-    { label: "OpenPGP encrypted forwarding", included: true },
-  ];
-  if (plan === "free")
-    return [
-      { label: "10 active aliases", included: true },
-      { label: "1 custom domain", included: true },
-      { label: "1 recipient", included: true },
-      ...sharedFeatures,
-    ];
-  if (plan === "basic")
-    return [
-      { label: "50 active aliases", included: true },
-      { label: "3 custom domains", included: true },
-      { label: "5 recipients", included: true },
-      ...sharedFeatures,
-      { label: "Email customer support", included: true },
-    ];
-  return [
-    { label: "Unlimited active aliases", included: true },
-    { label: "5 custom domains", included: true },
-    { label: "15 recipients", included: true },
-    ...sharedFeatures,
-    { label: "Chat customer support", included: true },
-  ];
-}
 function usagePercent(used: number, max: number) {
   return Math.min(100, Math.round((used / Math.max(max, 1)) * 100));
 }
@@ -241,7 +168,7 @@ function PlanCard({
   limits: PlanLimits;
   summary?: PlanSummary;
 }) {
-  const copy = PLAN_COPY[plan];
+  const copy = PLAN_DISPLAY[plan];
   const isCurrent = (summary?.plan ?? "free") === plan;
   return (
     <Card
@@ -274,20 +201,10 @@ function PlanCard({
         <div className="mt-1 text-sm text-muted-foreground">{copy.note}</div>
         <p className="mt-4 min-h-12 text-sm leading-6 text-muted-foreground">{copy.description}</p>
         <div className="mt-5 flex-1 space-y-3 text-sm">
-          {featuresFor(plan).map((feature) => (
-            <div
-              key={feature.label}
-              className={cn(
-                "flex items-center gap-3",
-                !feature.included && "text-muted-foreground",
-              )}
-            >
-              {feature.included ? (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-accent" />
-              ) : (
-                <XCircle className="h-4 w-4 shrink-0" />
-              )}
-              <span>{feature.label}</span>
+          {copy.features.map((feature) => (
+            <div key={feature} className="flex items-center gap-3">
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-accent" />
+              <span>{feature}</span>
             </div>
           ))}
         </div>
