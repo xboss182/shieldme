@@ -54,6 +54,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Tags,
+  RefreshCw,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/aliases")({ component: AliasesPage });
@@ -128,9 +129,25 @@ function PgpModeBadge({ mode }: { mode: string | undefined }) {
   );
 }
 
+function previewAliasLocalPart(serviceLabel: string) {
+  const normalized = serviceLabel
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 52);
+  if (!normalized) return "";
+  const bytes = new Uint8Array(5);
+  crypto.getRandomValues(bytes);
+  return `${normalized}-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
 function CreateAliasDialog() {
   const [open, setOpen] = useState(false);
+  const [serviceLabel, setServiceLabel] = useState("");
   const [localPart, setLocalPart] = useState("");
+  const [generatedPreview, setGeneratedPreview] = useState("");
   const [domainId, setDomainId] = useState("");
   const [recipientId, setRecipientId] = useState("");
   const [pgpMode, setPgpMode] = useState<"none" | "optional" | "required">("none");
@@ -144,16 +161,24 @@ function CreateAliasDialog() {
   const domains = (domsData?.domains ?? []).filter((d) => d.status === "verified");
   const recipients = (recData?.recipients ?? []).filter((r) => r.status === "verified");
   const mut = useMutation({
-    mutationFn: () => aliasesApi.create(localPart, domainId, recipientId),
+    mutationFn: () =>
+      aliasesApi.create({
+        serviceLabel: serviceLabel.trim() || undefined,
+        localPart: localPart.trim() || generatedPreview || undefined,
+        domainId,
+        recipientId,
+        pgpMode,
+      }),
     onSuccess: (data) => {
-      // If pgpMode != none, patch immediately after create
       if (pgpMode !== "none") {
         aliasesPgpApi.setPgpMode(data.alias.id, pgpMode).catch(() => {});
       }
       qc.invalidateQueries({ queryKey: ["aliases"] });
       qc.invalidateQueries({ queryKey: ["alias-stats"] });
       setOpen(false);
+      setServiceLabel("");
       setLocalPart("");
+      setGeneratedPreview("");
       setDomainId("");
       setRecipientId("");
       setPgpMode("none");
@@ -194,14 +219,51 @@ function CreateAliasDialog() {
             </p>
           )}
           <div className="space-y-1.5">
-            <Label>Local part</Label>
+            <Label>Service label</Label>
             <Input
-              placeholder="shopping"
-              value={localPart}
-              onChange={(e) => setLocalPart(e.target.value)}
-              required
+              placeholder="Netflix"
+              value={serviceLabel}
+              onChange={(e) => setServiceLabel(e.target.value)}
+              required={!localPart.trim()}
             />
-            <p className="text-xs text-muted-foreground">The part before the @ symbol</p>
+            <p className="text-xs text-muted-foreground">
+              Used to generate a private, unique alias.
+            </p>
+          </div>
+          {serviceLabel.trim() && !localPart.trim() && (
+            <div className="rounded-lg border border-border bg-surface/50 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground">Generated preview</p>
+                  <p className="mt-1 break-all font-mono text-sm text-foreground">
+                    {generatedPreview || "Generate a preview"}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5"
+                  onClick={() => setGeneratedPreview(previewAliasLocalPart(serviceLabel))}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  {generatedPreview ? "Regenerate" : "Preview"}
+                </Button>
+              </div>
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>
+              Alias name <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              placeholder="netflix-a1b2c3d4e5"
+              value={localPart}
+              onChange={(e) => setLocalPart(e.target.value.toLowerCase())}
+            />
+            <p className="text-xs text-muted-foreground">
+              Edit the generated alias or leave blank to use a cryptographic suffix.
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label>Domain</Label>

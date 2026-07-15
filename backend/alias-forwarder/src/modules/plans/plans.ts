@@ -19,7 +19,7 @@ export interface PlanLimits {
 export const PLAN_LIMITS: Record<AccountPlan, PlanLimits> = {
   free: { maxDomains: 1, maxAliases: 5, maxRecipients: 1, monthlyForwards: 100, pgpEnabled: false, customOutboundProvider: false, billingEnabled: false },
   basic: { maxDomains: 3, maxAliases: 50, maxRecipients: 5, monthlyForwards: 2_000, pgpEnabled: false, customOutboundProvider: false, billingEnabled: true },
-  pro: { maxDomains: 10, maxAliases: 500, maxRecipients: 25, monthlyForwards: 20_000, pgpEnabled: true, customOutboundProvider: true, billingEnabled: true },
+  pro: { maxDomains: 3, maxAliases: 500, maxRecipients: 5, monthlyForwards: 20_000, pgpEnabled: true, customOutboundProvider: true, billingEnabled: true },
   business: { maxDomains: 50, maxAliases: 5_000, maxRecipients: 250, monthlyForwards: 250_000, pgpEnabled: true, customOutboundProvider: true, billingEnabled: true },
 };
 

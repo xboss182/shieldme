@@ -621,28 +621,20 @@ function ConfigInner() {
   const [config, setConfig] = useState<AdminConfig | null>(null);
   const [platformDomain, setPlatformDomain] = useState("");
   const [resendApiKey, setResendApiKey] = useState("");
-  const [outboundProvider, setOutboundProvider] = useState<"resend" | "ses">("resend");
+  const outboundProvider = "resend" as const;
   const [msg, setMsg] = useState("");
   useEffect(() => {
     adminApi.getConfig().then((c) => {
       setConfig(c);
       setPlatformDomain(c.platformDomain ?? "");
-      setOutboundProvider(c.outboundProvider ?? "resend");
     });
   }, []);
-  const sesReady = Boolean(config?.sesConfigured);
   const resendReady = Boolean(config?.resendConfigured);
-  const providerOptions = [
-    { value: "resend" as const, label: "Resend" },
-    ...(sesReady ? [{ value: "ses" as const, label: "Amazon SES" }] : []),
-  ];
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    const provider = outboundProvider === "ses" && !sesReady ? "resend" : outboundProvider;
-    const c = await adminApi.setConfig(platformDomain, resendApiKey, provider);
+    const c = await adminApi.setConfig(platformDomain, resendApiKey, outboundProvider);
     setConfig(c);
     setResendApiKey("");
-    setOutboundProvider(c.outboundProvider ?? provider);
     setMsg("Configuration saved");
   };
   return (
@@ -651,8 +643,7 @@ function ConfigInner() {
         <CardHeader>
           <CardTitle>Admin configuration</CardTitle>
           <CardDescription>
-            Keep the live mail routing simple. SES is shown as environment status only unless it is
-            already configured on the backend.
+            Manage the platform domain and Resend delivery configuration.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -682,33 +673,13 @@ function ConfigInner() {
                 {msg}
               </p>
             )}
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Platform domain</Label>
-                <Input
-                  value={platformDomain}
-                  onChange={(e) => setPlatformDomain(e.target.value)}
-                  placeholder="shieldme.cc"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Outbound provider</Label>
-                <select
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={outboundProvider === "ses" && !sesReady ? "resend" : outboundProvider}
-                  onChange={(e) => setOutboundProvider(e.target.value as "resend" | "ses")}
-                >
-                  {providerOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">
-                  SES is locked unless backend AWS env is configured, so it cannot be selected by
-                  accident.
-                </p>
-              </div>
+            <div className="space-y-2">
+              <Label>Platform domain</Label>
+              <Input
+                value={platformDomain}
+                onChange={(e) => setPlatformDomain(e.target.value)}
+                placeholder="shieldme.cc"
+              />
             </div>
             <div className="space-y-2">
               <Label>Resend API key</Label>
@@ -746,23 +717,8 @@ function ConfigInner() {
               </Badge>
             )}
           </div>
-          <div className="flex items-center justify-between rounded-xl border border-border bg-surface/50 p-3">
-            <span>Amazon SES</span>
-            {sesReady ? (
-              <Badge className="gap-1 bg-accent/20 text-accent">
-                <CheckCircle2 className="h-3 w-3" />
-                Env ready
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="gap-1">
-                <XCircle className="h-3 w-3" />
-                Env not configured
-              </Badge>
-            )}
-          </div>
           <p className="text-xs leading-5 text-muted-foreground">
-            SES credentials are managed only in backend environment variables. This screen will not
-            ask for or expose AWS keys.
+            Delivery credentials are never displayed in the admin interface.
           </p>
         </CardContent>
       </Card>

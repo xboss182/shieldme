@@ -81,6 +81,8 @@ import {
   AliasError,
   getAliasProtection,
   getAliasStats,
+  generateAliasLocalPart,
+  normalizeServiceLabel,
 } from './aliases.service.js';
 
 const OWNER_ID = 'owner-uuid-001';
@@ -177,6 +179,22 @@ describe('getAliasProtection', () => {
   });
 });
 
+describe('generated alias names', () => {
+  it('normalizes service labels and generates a hexadecimal crypto suffix', () => {
+    expect(normalizeServiceLabel('Nétflix & Chill!')).toBe('netflix-chill');
+    expect(generateAliasLocalPart('Nétflix & Chill!')).toMatch(/^netflix-chill-[a-f0-9]{10}$/);
+  });
+
+  it('generates independent suffixes', () => {
+    const generated = new Set(Array.from({ length: 10 }, () => generateAliasLocalPart('netflix')));
+    expect(generated.size).toBeGreaterThan(1);
+  });
+
+  it('rejects labels without letters or numbers', () => {
+    expect(() => normalizeServiceLabel('---')).toThrow('Service label must contain letters or numbers');
+  });
+});
+
 // ── createAlias ───────────────────────────────────────────────────────────────
 describe('createAlias', () => {
   it('creates an alias and returns address', async () => {
@@ -194,6 +212,29 @@ describe('createAlias', () => {
   });
 
 
+
+  it('retries generated aliases after a collision', async () => {
+    mockFindFirst.mockResolvedValueOnce(makeAliasRow()).mockResolvedValueOnce(null);
+    mockInsertChain([makeAliasRow({ localPart: 'netflix-abcdef1234' })]);
+
+    const result = await createAlias(OWNER_ID, {
+      serviceLabel: 'Netflix',
+      domainId: DOMAIN_ID,
+      recipientId: RECIPIENT_ID,
+    });
+
+    expect(result.alias.localPart).toMatch(/^netflix-[a-f0-9]{10}$/);
+    expect(mockFindFirst).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects generated aliases after bounded collision exhaustion', async () => {
+    mockFindFirst.mockResolvedValue(makeAliasRow());
+
+    await expect(
+      createAlias(OWNER_ID, { serviceLabel: 'Netflix', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID }),
+    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('Could not generate') });
+    expect(mockFindFirst).toHaveBeenCalledTimes(5);
+  });
 
   it('rejects reserved operational/security local-parts', async () => {
     await expect(
@@ -251,6 +292,13 @@ describe('createAlias', () => {
     const { createAliasSchema } = await import('./aliases.schemas.js');
     expect(() => createAliasSchema.parse({ localPart: 'has space', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID }))
       .toThrow();
+  });
+
+  it('accepts a generated-alias request with a service label', async () => {
+    const { createAliasSchema } = await import('./aliases.schemas.js');
+    const result = createAliasSchema.parse({ serviceLabel: 'Netflix', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID });
+    expect(result.serviceLabel).toBe('Netflix');
+    expect(result.localPart).toBeUndefined();
   });
 
   it('accepts single-char local-part', async () => {

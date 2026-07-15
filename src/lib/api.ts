@@ -385,10 +385,16 @@ export const recipientsApi = {
 
 export const aliasesApi = {
   list: () => apiFetch<{ aliases: Alias[] }>("/api/aliases"),
-  create: (localPart: string, domainId: string, recipientId: string) =>
+  create: (input: {
+    localPart?: string;
+    serviceLabel?: string;
+    domainId: string;
+    recipientId: string;
+    pgpMode?: "none" | "optional" | "required";
+  }) =>
     apiFetch<{ alias: Alias; address: string; recipientEmail: string }>("/api/aliases", {
       method: "POST",
-      body: JSON.stringify({ localPart, domainId, recipientId }),
+      body: JSON.stringify(input),
     }),
   enable: (id: string) =>
     apiFetch<{ alias: Alias }>("/api/aliases/" + id + "/enable", { method: "POST" }),

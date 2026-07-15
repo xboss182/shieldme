@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { and, eq, ne, sql, count, inArray } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { aliases, domains, mailLogs, reservedLocalParts } from '../../db/schema.js';
@@ -76,58 +77,47 @@ function withAliasProtection<T extends { pgpMode: 'none' | 'optional' | 'require
   return { ...alias, protection, protectionStatus: protection.status };
 }
 
+export function normalizeServiceLabel(value: string) {
+  const normalized = value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 52);
+  if (!normalized) throw new AliasError('Service label must contain letters or numbers');
+  return normalized;
+}
+
+export function generateAliasLocalPart(serviceLabel: string) {
+  return `${normalizeServiceLabel(serviceLabel)}-${crypto.randomBytes(5).toString('hex')}`;
+}
+
 export async function createAlias(ownerId: string, input: CreateAliasInput) {
   await assertCanCreateAlias(ownerId);
   await assertOutboundProviderAllowed(ownerId);
   if (input.pgpMode && input.pgpMode !== 'none') await assertPgpAllowed(ownerId);
-
   const domain = await assertDomainVerified(ownerId, input.domainId);
   const recipient = await assertRecipientVerified(ownerId, input.recipientId);
-
-  const reservedRules = await db.query.reservedLocalParts.findMany({
-    where: sql`${reservedLocalParts.localPart} = ${input.localPart} and (${reservedLocalParts.domainId} is null or ${reservedLocalParts.domainId} = ${input.domainId})`,
-    columns: { localPart: true, domainId: true, action: true },
-  });
-  const reservation = resolveReservedLocalPart(input.localPart, reservedRules, input.domainId);
-  if (reservation.reserved) {
-    throw new AliasError(`Alias ${input.localPart}@${domain.domain} is reserved for domain operations and security`, 403);
-  }
-
-  const conflict = await db.query.aliases.findFirst({
-    where: and(
-      eq(aliases.localPart, input.localPart),
-      eq(aliases.domainId, input.domainId),
-    ),
-  });
-  if (conflict) {
-    const suffix = conflict.status === 'deleted' ? ' was used before and is reserved' : ' already exists';
-    throw new AliasError(`Alias ${input.localPart}@${domain.domain}${suffix}`, 409);
-  }
-
-  let alias;
-  try {
-    [alias] = await db
-      .insert(aliases)
-      .values({
-        ownerId,
-        domainId: input.domainId,
-        recipientId: input.recipientId,
-        localPart: input.localPart,
-        pgpMode: input.pgpMode ?? 'none',
-      })
-      .returning();
-  } catch (err) {
-    if (typeof err === 'object' && err && 'code' in err && (err as { code?: string }).code === '23505') {
-      throw new AliasError(`Alias ${input.localPart}@${domain.domain} already exists`, 409);
+  const attempts = input.localPart ? 1 : 5;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const localPart = input.localPart ?? generateAliasLocalPart(input.serviceLabel!);
+    const reservedRules = await db.query.reservedLocalParts.findMany({ where: sql`${reservedLocalParts.localPart} = ${localPart} and (${reservedLocalParts.domainId} is null or ${reservedLocalParts.domainId} = ${input.domainId})`, columns: { localPart: true, domainId: true, action: true } });
+    if (resolveReservedLocalPart(localPart, reservedRules, input.domainId).reserved) {
+      if (input.localPart) throw new AliasError(`Alias ${localPart}@${domain.domain} is reserved for domain operations and security`, 403);
+      continue;
     }
-    throw err;
+    const conflict = await db.query.aliases.findFirst({ where: and(eq(aliases.localPart, localPart), eq(aliases.domainId, input.domainId)) });
+    if (conflict) {
+      if (input.localPart) throw new AliasError(`Alias ${localPart}@${domain.domain}${conflict.status === 'deleted' ? ' was used before and is reserved' : ' already exists'}`, 409);
+      continue;
+    }
+    try {
+      const [alias] = await db.insert(aliases).values({ ownerId, domainId: input.domainId, recipientId: input.recipientId, localPart, pgpMode: input.pgpMode ?? 'none' }).returning();
+      return { alias, address: `${alias.localPart}@${domain.domain}`, recipientEmail: recipient.email };
+    } catch (err) {
+      if (typeof err === 'object' && err && 'code' in err && (err as { code?: string }).code === '23505') {
+        if (!input.localPart) continue;
+        throw new AliasError(`Alias ${localPart}@${domain.domain} already exists`, 409);
+      }
+      throw err;
+    }
   }
-
-  return {
-    alias,
-    address: `${alias.localPart}@${domain.domain}`,
-    recipientEmail: recipient.email,
-  };
+  throw new AliasError('Could not generate a unique alias. Please try again.', 409);
 }
 
 export async function updateAlias(ownerId: string, aliasId: string, input: UpdateAliasInput) {
