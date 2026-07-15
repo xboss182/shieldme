@@ -1,0 +1,59 @@
+---
+shieldme_system_user: shieldme
+shieldme_system_group: shieldme
+nodejs_major_version: 22
+shieldme_repo_path: /root/alias-forwarder
+shieldme_api_path: /root/alias-forwarder
+shieldme_site_path: /var/www/shieldme
+shieldme_security_root: /var/www/shieldme-security
+shieldme_api_port: 4005
+shieldme_site_port: 3006
+shieldme_smtp_port: 2525
+shieldme_allow_public_smtp_25: true
+shieldme_extra_smtp_ports: []
+pm2_apps:
+  api: alias-forwarder-api
+  smtp: alias-forwarder-smtp
+  worker: alias-forwarder-worker
+  site: shieldme-site
+caddy_sites:
+  root_domains: [shieldme.cc, www.shieldme.cc]
+  app_domain: app.shieldme.cc
+  api_domain: api.shieldme.cc
+  mta_sts_domain: mta-sts.shieldme.cc
+shieldme_env_template:
+  NODE_ENV: production
+  PORT: "{{ shieldme_api_port }}"
+  SMTP_PORT: "{{ shieldme_smtp_port }}"
+  APP_URL: https://app.shieldme.cc
+  PLATFORM_DOMAIN: shieldme.cc
+  DATABASE_URL: postgresql://USER:REDACTED@127.0.0.1:5432/DBNAME
+  REDIS_URL: redis://127.0.0.1:6379
+  OUTBOUND_PROVIDER: resend
+  OUTBOUND_FALLBACK_PROVIDER: none
+  RESEND_API_KEY: REPLACE_WITH_VAULTED_SECRET
+  JWT_ACCESS_SECRET: REPLACE_WITH_VAULTED_SECRET_AT_LEAST_32_CHARS
+  JWT_REFRESH_SECRET: REPLACE_WITH_VAULTED_SECRET_AT_LEAST_32_CHARS
+  DKIM_SELECTOR: mail
+  SPAM_SCANNER_ENABLED: "true"
+  SPAM_SCANNER_ACTION: tag
+  TRACKING_PROTECTION_ENABLED: "true"
+base_os_disable_password_ssh: true
+base_os_disable_swap: false
+base_os_disable_core_dumps: false
+ufw_default_incoming_policy: deny
+ufw_default_outgoing_policy: allow
+ufw_allowed_tcp_ports:
+  - "22"
+  - "80"
+  - "443"
+ufw_allowed_optional_tcp_ports: "{{ ['25'] if shieldme_allow_public_smtp_25 else [] }}"
+sysctl_hardening:
+  net.ipv4.conf.all.rp_filter: 1
+  net.ipv4.conf.default.rp_filter: 1
+  net.ipv4.tcp_syncookies: 1
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.default.accept_redirects: 0
+  net.ipv6.conf.all.accept_redirects: 0
+  net.ipv6.conf.default.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0

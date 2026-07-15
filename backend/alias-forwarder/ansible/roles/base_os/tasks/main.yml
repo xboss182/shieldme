@@ -1,0 +1,89 @@
+---
+- name: Install base security packages
+  ansible.builtin.apt:
+    name: [ufw, fail2ban, unattended-upgrades, apt-listchanges]
+    state: present
+    update_cache: true
+
+- name: Configure unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Set UFW defaults
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: "{{ ufw_default_incoming_policy }}" }
+    - { direction: outgoing, policy: "{{ ufw_default_outgoing_policy }}" }
+
+- name: Allow required TCP ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ ufw_allowed_tcp_ports + ufw_allowed_optional_tcp_ports + shieldme_extra_smtp_ports }}"
+
+- name: Enable UFW
+  community.general.ufw:
+    state: enabled
+
+- name: Enable fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+
+- name: Disable SSH password login when opted in
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    validate: 'sshd -t -f %s'
+  notify: reload ssh
+  when: base_os_disable_password_ssh | bool
+
+- name: Restrict root SSH to key-only when password SSH is disabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin prohibit-password'
+    validate: 'sshd -t -f %s'
+  notify: reload ssh
+  when: base_os_disable_password_ssh | bool
+
+- name: Ensure SSH public key authentication remains enabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PubkeyAuthentication'
+    line: 'PubkeyAuthentication yes'
+    validate: 'sshd -t -f %s'
+  notify: reload ssh
+  when: base_os_disable_password_ssh | bool
+
+- name: Apply conservative sysctl hardening
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+  loop: "{{ sysctl_hardening | dict2items }}"
+
+- name: Optionally disable swap - high risk, opt in only
+  ansible.builtin.command: swapoff -a
+  changed_when: false
+  when: base_os_disable_swap | bool
+
+- name: Optionally restrict core dumps - high risk, opt in only
+  ansible.builtin.copy:
+    dest: /etc/security/limits.d/99-disable-core-dumps.conf
+    mode: '0644'
+    content: '* hard core 0
+'
+  when: base_os_disable_core_dumps | bool

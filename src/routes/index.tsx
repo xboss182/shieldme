@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
+import { PLAN_DISPLAY } from "../lib/plan-display";
 import {
   Shield,
   Mail,
@@ -22,6 +23,8 @@ import {
   Heart,
   ShoppingBag,
   MessageSquare,
+  Menu,
+  X,
 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -369,39 +372,76 @@ function UseCases() {
 }
 
 function Nav() {
+  const [open, setOpen] = useState(false);
+  const links = [
+    ["#features", "Features"],
+    ["#how", "How it works"],
+    ["#pricing", "Pricing"],
+    ["#faq", "FAQ"],
+  ] as const;
   return (
     <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-        <a href="#" className="flex items-center gap-2 font-display text-lg font-bold">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-accent-grad text-primary-foreground">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6 sm:py-4">
+        <a href="#" className="flex min-w-0 items-center gap-2 font-display text-lg font-bold">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-accent-grad text-primary-foreground">
             <Shield className="h-4 w-4" strokeWidth={2.5} />
           </span>
           ShieldMail
         </a>
         <nav className="hidden items-center gap-8 text-sm text-muted-foreground md:flex">
-          <a href="#features" className="hover:text-foreground">
-            Features
-          </a>
-          <a href="#how" className="hover:text-foreground">
-            How it works
-          </a>
-          <a href="#pricing" className="hover:text-foreground">
-            Pricing
-          </a>
-          <a href="#faq" className="hover:text-foreground">
-            FAQ
-          </a>
+          {links.map(([href, label]) => (
+            <a key={href} href={href} className="hover:text-foreground">
+              {label}
+            </a>
+          ))}
         </nav>
-        <a
-          href="https://app.shieldme.cc/login"
-          className="hidden text-sm font-medium text-muted-foreground hover:text-foreground md:inline-flex"
+        <div className="hidden items-center gap-5 md:flex">
+          <a
+            href="https://app.shieldme.cc/login"
+            className="text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            Sign In
+          </a>
+          <CTA href="https://app.shieldme.cc/register" className="!px-5 !py-2 text-xs">
+            Get Protected
+          </CTA>
+        </div>
+        <button
+          type="button"
+          aria-label={open ? "Close navigation" : "Open navigation"}
+          aria-expanded={open}
+          aria-controls="mobile-navigation"
+          onClick={() => setOpen(!open)}
+          className="grid h-10 w-10 place-items-center rounded-lg border border-border text-foreground md:hidden"
         >
-          Sign In
-        </a>
-        <CTA href="https://app.shieldme.cc/register" className="!px-5 !py-2 text-xs">
-          Get Protected
-        </CTA>
+          {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
       </div>
+      {open && (
+        <nav id="mobile-navigation" className="border-t border-border px-4 py-3 md:hidden">
+          <div className="mx-auto flex max-w-6xl flex-col gap-1">
+            {links.map(([href, label]) => (
+              <a
+                key={href}
+                href={href}
+                onClick={() => setOpen(false)}
+                className="rounded-lg px-3 py-3 text-sm text-muted-foreground hover:bg-surface hover:text-foreground"
+              >
+                {label}
+              </a>
+            ))}
+            <a
+              href="https://app.shieldme.cc/login"
+              className="rounded-lg px-3 py-3 text-sm text-muted-foreground hover:bg-surface hover:text-foreground"
+            >
+              Sign In
+            </a>
+            <CTA href="https://app.shieldme.cc/register" className="mt-2 w-full">
+              Get Protected
+            </CTA>
+          </div>
+        </nav>
+      )}
     </header>
   );
 }
@@ -703,46 +743,7 @@ function HowItWorks() {
 }
 
 function Pricing() {
-  const plans = [
-    {
-      name: "Free",
-      price: "$0",
-      year: "Free forever — no credit card",
-      note: "Try it risk-free",
-      features: [
-        "10 active aliases",
-        "1 custom domain",
-        "1 recipient",
-        "OpenPGP encrypted forwarding",
-        "Instant alias blocking",
-        "Works with any inbox",
-      ],
-      cta: "Start Free",
-    },
-    {
-      name: "Basic",
-      price: "$4",
-      year: "Billed once — full year of protection",
-      note: "About a cent a day",
-      features: ["Everything in Free", "50 active aliases", "3 custom domains", "5 recipients"],
-      cta: "Get Basic",
-    },
-    {
-      name: "Shield",
-      price: "$10",
-      year: "Billed once — full year of protection",
-      note: "Under $1/month",
-      features: [
-        "Unlimited aliases",
-        "5 custom domains",
-        "Priority support",
-        "15 recipients",
-        "Chat customer support",
-      ],
-      cta: "Protect My Inbox",
-      featured: true,
-    },
-  ];
+  const plans = Object.values(PLAN_DISPLAY);
   return (
     <section id="pricing" className="mx-auto max-w-6xl px-6 py-24">
       <div className="mx-auto max-w-3xl text-center">
@@ -773,7 +774,11 @@ function Pricing() {
               <span className="font-display text-5xl font-bold">{p.price}</span>
               <span className="text-foreground/75">/year</span>
             </div>
-            <div className="text-xs text-foreground/75">{p.year}</div>
+            <div className="text-xs text-foreground/75">
+              {p.name === "Free"
+                ? "Free forever — no credit card"
+                : "Billed once — full year of protection"}
+            </div>
             <div className="mt-1 text-xs font-medium text-accent">{p.note}</div>
             <ul className="mt-6 flex-1 space-y-3 text-sm">
               {p.features.map((f) => (
@@ -828,19 +833,19 @@ function Comparison() {
           <h2 className="text-4xl font-bold md:text-5xl">Why people switch to ShieldMail.</h2>
         </div>
         <div className="mt-10 overflow-hidden rounded-2xl border border-border bg-card-grad shadow-card">
-          <div className="grid grid-cols-[1.5fr_1fr_1fr] border-b border-border bg-surface-2 px-5 py-4 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            <div>Feature</div>
-            <div className="text-center text-accent">ShieldMail</div>
-            <div className="text-center">Free forwarders</div>
+          <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] border-b border-border bg-surface-2 px-4 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground sm:px-5 sm:tracking-widest">
+            <div className="min-w-0">Feature</div>
+            <div className="min-w-0 text-center text-accent">ShieldMail</div>
+            <div className="min-w-0 text-center">Free forwarders</div>
           </div>
           {rows.map(([label, a, b], i) => (
             <div
               key={i}
-              className="grid grid-cols-[1.5fr_1fr_1fr] items-center border-b border-border px-5 py-4 text-sm last:border-0"
+              className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] items-center border-b border-border px-4 py-4 text-xs last:border-0 sm:px-5 sm:text-sm"
             >
-              <div className="font-medium">{label as string}</div>
-              <div className="text-center">{renderCell(a)}</div>
-              <div className="text-center">{renderCell(b)}</div>
+              <div className="min-w-0 font-medium">{label as string}</div>
+              <div className="min-w-0 text-center">{renderCell(a)}</div>
+              <div className="min-w-0 text-center">{renderCell(b)}</div>
             </div>
           ))}
         </div>

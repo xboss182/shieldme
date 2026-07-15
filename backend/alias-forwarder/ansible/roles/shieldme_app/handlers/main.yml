@@ -1,0 +1,11 @@
+---
+- name: restart shieldme pm2 apps
+  ansible.builtin.shell: |
+    set -e
+    for app in {{ pm2_apps.api }} {{ pm2_apps.smtp }} {{ pm2_apps.worker }} {{ pm2_apps.site }}; do
+      pm2 restart "$app" --update-env || true
+    done
+    pm2 save || true
+  args:
+    executable: /bin/bash
+  changed_when: true

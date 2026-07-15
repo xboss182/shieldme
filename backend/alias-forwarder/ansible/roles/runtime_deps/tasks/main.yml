@@ -1,0 +1,37 @@
+---
+- name: Install runtime packages
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, gnupg, git, build-essential, redis-server, postgresql-client, caddy]
+    state: present
+    update_cache: true
+
+- name: Add NodeSource repository for Node.js
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL https://deb.nodesource.com/setup_{{ nodejs_major_version }}.x | bash -
+  args:
+    executable: /bin/bash
+    creates: /etc/apt/sources.list.d/nodesource.list
+
+- name: Install Node.js
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: true
+
+- name: Enable corepack
+  ansible.builtin.command: corepack enable
+  changed_when: false
+
+- name: Ensure PM2 is installed globally
+  community.general.npm:
+    name: pm2
+    global: true
+    state: present
+
+- name: Ensure Caddy and Redis are enabled
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [caddy, redis-server]

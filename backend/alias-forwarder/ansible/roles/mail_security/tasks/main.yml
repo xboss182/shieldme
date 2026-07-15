@@ -1,0 +1,8 @@
+---
+- name: Install mail security DNS reference
+  ansible.builtin.template:
+    src: mail-security-records.md.j2
+    dest: "{{ shieldme_api_path }}/docs/mail-security-records.example.md"
+    owner: root
+    group: root
+    mode: '0644'

@@ -1,0 +1,60 @@
+module.exports = {
+  apps: [
+    {
+      name: '{{ pm2_apps.api }}',
+      cwd: '{{ shieldme_api_path }}',
+      script: 'dist/index.js',
+      interpreter: 'node',
+      instances: 1,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s',
+      restart_delay: 5000,
+      max_memory_restart: '512M',
+      kill_timeout: 10000,
+      env: { NODE_ENV: 'production', PORT: '{{ shieldme_api_port }}' }
+    },
+    {
+      name: '{{ pm2_apps.smtp }}',
+      cwd: '{{ shieldme_api_path }}',
+      script: 'dist/smtp/smtp.server.js',
+      interpreter: 'node',
+      instances: 1,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s',
+      restart_delay: 5000,
+      max_memory_restart: '512M',
+      kill_timeout: 10000,
+      env: { NODE_ENV: 'production', SMTP_PORT: '{{ shieldme_smtp_port }}' }
+    },
+    {
+      name: '{{ pm2_apps.worker }}',
+      cwd: '{{ shieldme_api_path }}',
+      script: 'dist/workers/forwarding.worker.js',
+      interpreter: 'node',
+      instances: 1,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s',
+      restart_delay: 5000,
+      max_memory_restart: '512M',
+      kill_timeout: 10000,
+      env: { NODE_ENV: 'production' }
+    },
+    {
+      name: '{{ pm2_apps.site }}',
+      cwd: '{{ shieldme_site_path }}',
+      script: 'npm',
+      args: 'start',
+      instances: 1,
+      autorestart: true,
+      max_restarts: 10,
+      min_uptime: '10s',
+      restart_delay: 5000,
+      max_memory_restart: '512M',
+      kill_timeout: 10000,
+      env: { NODE_ENV: 'production', PORT: '{{ shieldme_site_port }}' }
+    }
+  ]
+};

@@ -74,10 +74,10 @@ const FALLBACK_LIMITS: Record<string, PlanSummary> = {
     plan: "pro",
     usage: { domains: 0, aliases: 0, recipients: 0, monthlyForwards: 0 },
     limits: {
-      maxDomains: 10,
+      maxDomains: 3,
       maxAliases: 500,
-      maxRecipients: 25,
-      monthlyForwards: 10000,
+      maxRecipients: 5,
+      monthlyForwards: 20000,
       pgpEnabled: true,
       customOutboundProvider: true,
       billingEnabled: true,
