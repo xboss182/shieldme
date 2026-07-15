@@ -1,4 +1,5 @@
-import { bigint, boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid, unique } from 'drizzle-orm/pg-core';
+import { bigint, boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ── Users (Stage 1) ─────────────────────────────────────────────────────────
 export const userRoleEnum = pgEnum('user_role', ['admin', 'user']);
@@ -174,7 +175,7 @@ export const suppressionList = pgTable('suppression_list', {
 });
 
 // ── Audit logs (Stage 12) ────────────────────────────────────────────────────
-export const auditActorTypeEnum = pgEnum('audit_actor_type', ['admin', 'system', 'user']);
+export const actorTypeEnum = pgEnum('actor_type', ['admin', 'system', 'user']);
 
 export const reservedLocalPartActionEnum = pgEnum('reserved_local_part_action', ['reserve', 'allow']);
 
@@ -187,17 +188,18 @@ export const reservedLocalParts = pgTable('reserved_local_parts', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  unique('reserved_local_parts_local_part_domain_id_unique').on(t.localPart, t.domainId),
+  uniqueIndex('reserved_local_parts_global_unique').on(t.localPart).where(sql`${t.domainId} is null`),
+  uniqueIndex('reserved_local_parts_domain_unique').on(t.localPart, t.domainId).where(sql`${t.domainId} is not null`),
 ]);
 
 export const auditLogs = pgTable('audit_logs', {
   id: uuid('id').defaultRandom().primaryKey(),
   timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
-  actorType: auditActorTypeEnum('actor_type').notNull(),
+  actorType: actorTypeEnum('actor_type').notNull(),
   actorId: text('actor_id'),
   action: text('action').notNull(),
   targetType: text('target_type').notNull(),
-  targetId: uuid('target_id').notNull(),
+  targetId: text('target_id').notNull(),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 });
 
