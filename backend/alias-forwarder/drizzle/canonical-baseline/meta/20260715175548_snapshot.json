@@ -254,10 +254,35 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "delivery_failure_log_alias_id_idx": {
+          "name": "delivery_failure_log_alias_id_idx",
+          "columns": [{ "expression": "alias_id", "isExpression": false, "asc": true, "nulls": "last" }],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "delivery_failure_log_reason_idx": {
+          "name": "delivery_failure_log_reason_idx",
+          "columns": [{ "expression": "reason", "isExpression": false, "asc": true, "nulls": "last" }],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "delivery_failure_log_timestamp_idx": {
+          "name": "delivery_failure_log_timestamp_idx",
+          "columns": [{ "expression": "timestamp", "isExpression": false, "asc": true, "nulls": "last" }],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
-        "delivery_failure_log_alias_id_aliases_id_fk": {
-          "name": "delivery_failure_log_alias_id_aliases_id_fk",
+        "delivery_failure_log_alias_id_fkey": {
+          "name": "delivery_failure_log_alias_id_fkey",
           "tableFrom": "delivery_failure_log",
           "tableTo": "aliases",
           "columnsFrom": [
@@ -628,8 +653,8 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "pgp_keys_user_id_users_id_fk": {
-          "name": "pgp_keys_user_id_users_id_fk",
+        "pgp_keys_user_id_fkey": {
+          "name": "pgp_keys_user_id_fkey",
           "tableFrom": "pgp_keys",
           "tableTo": "users",
           "columnsFrom": [
@@ -641,8 +666,8 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "pgp_keys_recipient_id_recipients_id_fk": {
-          "name": "pgp_keys_recipient_id_recipients_id_fk",
+        "pgp_keys_recipient_id_fkey": {
+          "name": "pgp_keys_recipient_id_fkey",
           "tableFrom": "pgp_keys",
           "tableTo": "recipients",
           "columnsFrom": [
@@ -657,15 +682,15 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "pgp_keys_recipient_id_unique": {
-          "name": "pgp_keys_recipient_id_unique",
+        "pgp_keys_recipient_id_key": {
+          "name": "pgp_keys_recipient_id_key",
           "nullsNotDistinct": false,
           "columns": [
             "recipient_id"
           ]
         },
-        "pgp_keys_fingerprint_unique": {
-          "name": "pgp_keys_fingerprint_unique",
+        "pgp_keys_fingerprint_key": {
+          "name": "pgp_keys_fingerprint_key",
           "nullsNotDistinct": false,
           "columns": [
             "fingerprint"
@@ -862,8 +887,8 @@
         }
       },
       "foreignKeys": {
-        "reserved_local_parts_domain_id_domains_id_fk": {
-          "name": "reserved_local_parts_domain_id_domains_id_fk",
+        "reserved_local_parts_domain_id_fkey": {
+          "name": "reserved_local_parts_domain_id_fkey",
           "tableFrom": "reserved_local_parts",
           "tableTo": "domains",
           "columnsFrom": [
@@ -915,8 +940,8 @@
       },
       "indexes": {},
       "foreignKeys": {
-        "sender_blocklists_alias_id_aliases_id_fk": {
-          "name": "sender_blocklists_alias_id_aliases_id_fk",
+        "sender_blocklists_alias_id_fkey": {
+          "name": "sender_blocklists_alias_id_fkey",
           "tableFrom": "sender_blocklists",
           "tableTo": "aliases",
           "columnsFrom": [
@@ -980,8 +1005,8 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "suppression_list_email_unique": {
-          "name": "suppression_list_email_unique",
+        "suppression_list_email_key": {
+          "name": "suppression_list_email_key",
           "nullsNotDistinct": false,
           "columns": [
             "email"

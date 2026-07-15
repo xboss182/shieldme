@@ -18,4 +18,32 @@ describe('canonical production baseline', () => {
     expect(baseline).toContain('CREATE UNIQUE INDEX "reserved_local_parts_domain_unique"');
     expect(baseline).toContain('WHERE "reserved_local_parts"."domain_id" is not null');
   });
+
+  it('materializes the empty Drizzle migration ledger', () => {
+    expect(baseline).toContain('CREATE SCHEMA "drizzle"');
+    expect(baseline).toMatch(/CREATE TABLE "drizzle"\."__drizzle_migrations" \([\s\S]*?"id" serial PRIMARY KEY NOT NULL,[\s\S]*?"hash" text NOT NULL,[\s\S]*?"created_at" bigint/);
+    expect(baseline).not.toMatch(/INSERT INTO "drizzle"\."__drizzle_migrations"/);
+  });
+
+  it('pins approved production constraint names', () => {
+    for (const name of [
+      'delivery_failure_log_alias_id_fkey',
+      'pgp_keys_fingerprint_key',
+      'pgp_keys_recipient_id_fkey',
+      'pgp_keys_recipient_id_key',
+      'pgp_keys_user_id_fkey',
+      'reserved_local_parts_domain_id_fkey',
+      'sender_blocklists_alias_id_fkey',
+      'suppression_list_email_key',
+    ]) {
+      expect(baseline).toContain(`"${name}"`);
+    }
+  });
+
+  it('preserves delivery failure lookup indexes and metadata-only policy', () => {
+    expect(baseline).toContain('CREATE INDEX "delivery_failure_log_alias_id_idx"');
+    expect(baseline).toContain('CREATE INDEX "delivery_failure_log_reason_idx"');
+    expect(baseline).toContain('CREATE INDEX "delivery_failure_log_timestamp_idx"');
+    expect(baseline).toContain("COMMENT ON TABLE \"delivery_failure_log\" IS 'Metadata-only delivery failure log. Do not store message bodies.'");
+  });
 });

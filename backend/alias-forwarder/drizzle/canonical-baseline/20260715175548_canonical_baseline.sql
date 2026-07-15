@@ -1,3 +1,9 @@
+CREATE SCHEMA "drizzle";--> statement-breakpoint
+CREATE TABLE "drizzle"."__drizzle_migrations" (
+	"id" serial PRIMARY KEY NOT NULL,
+	"hash" text NOT NULL,
+	"created_at" bigint
+);--> statement-breakpoint
 CREATE TYPE "public"."account_plan" AS ENUM('free', 'basic', 'pro', 'business');--> statement-breakpoint
 CREATE TYPE "public"."actor_type" AS ENUM('admin', 'system', 'user');--> statement-breakpoint
 CREATE TYPE "public"."alias_status" AS ENUM('active', 'disabled', 'deleted');--> statement-breakpoint
@@ -98,8 +104,8 @@ CREATE TABLE "pgp_keys" (
 	"expires_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "pgp_keys_recipient_id_unique" UNIQUE("recipient_id"),
-	CONSTRAINT "pgp_keys_fingerprint_unique" UNIQUE("fingerprint")
+	CONSTRAINT "pgp_keys_recipient_id_key" UNIQUE("recipient_id"),
+	CONSTRAINT "pgp_keys_fingerprint_key" UNIQUE("fingerprint")
 );
 --> statement-breakpoint
 CREATE TABLE "recipients" (
@@ -138,7 +144,7 @@ CREATE TABLE "suppression_list" (
 	"email" text NOT NULL,
 	"reason" "suppression_reason" NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "suppression_list_email_unique" UNIQUE("email")
+	CONSTRAINT "suppression_list_email_key" UNIQUE("email")
 );
 --> statement-breakpoint
 CREATE TABLE "tti_checks" (
@@ -178,13 +184,17 @@ CREATE TABLE "users" (
 ALTER TABLE "aliases" ADD CONSTRAINT "aliases_owner_id_users_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "aliases" ADD CONSTRAINT "aliases_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "aliases" ADD CONSTRAINT "aliases_recipient_id_recipients_id_fk" FOREIGN KEY ("recipient_id") REFERENCES "public"."recipients"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "delivery_failure_log" ADD CONSTRAINT "delivery_failure_log_alias_id_aliases_id_fk" FOREIGN KEY ("alias_id") REFERENCES "public"."aliases"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "delivery_failure_log" ADD CONSTRAINT "delivery_failure_log_alias_id_fkey" FOREIGN KEY ("alias_id") REFERENCES "public"."aliases"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "domains" ADD CONSTRAINT "domains_owner_id_users_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mail_logs" ADD CONSTRAINT "mail_logs_alias_id_aliases_id_fk" FOREIGN KEY ("alias_id") REFERENCES "public"."aliases"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pgp_keys" ADD CONSTRAINT "pgp_keys_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pgp_keys" ADD CONSTRAINT "pgp_keys_recipient_id_recipients_id_fk" FOREIGN KEY ("recipient_id") REFERENCES "public"."recipients"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pgp_keys" ADD CONSTRAINT "pgp_keys_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "pgp_keys" ADD CONSTRAINT "pgp_keys_recipient_id_fkey" FOREIGN KEY ("recipient_id") REFERENCES "public"."recipients"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "recipients" ADD CONSTRAINT "recipients_owner_id_users_id_fk" FOREIGN KEY ("owner_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "reserved_local_parts" ADD CONSTRAINT "reserved_local_parts_domain_id_domains_id_fk" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "sender_blocklists" ADD CONSTRAINT "sender_blocklists_alias_id_aliases_id_fk" FOREIGN KEY ("alias_id") REFERENCES "public"."aliases"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "reserved_local_parts" ADD CONSTRAINT "reserved_local_parts_domain_id_fkey" FOREIGN KEY ("domain_id") REFERENCES "public"."domains"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "sender_blocklists" ADD CONSTRAINT "sender_blocklists_alias_id_fkey" FOREIGN KEY ("alias_id") REFERENCES "public"."aliases"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "delivery_failure_log_alias_id_idx" ON "delivery_failure_log" USING btree ("alias_id");--> statement-breakpoint
+CREATE INDEX "delivery_failure_log_reason_idx" ON "delivery_failure_log" USING btree ("reason");--> statement-breakpoint
+CREATE INDEX "delivery_failure_log_timestamp_idx" ON "delivery_failure_log" USING btree ("timestamp");--> statement-breakpoint
+COMMENT ON TABLE "delivery_failure_log" IS 'Metadata-only delivery failure log. Do not store message bodies.';--> statement-breakpoint
 CREATE UNIQUE INDEX "reserved_local_parts_global_unique" ON "reserved_local_parts" USING btree ("local_part") WHERE "reserved_local_parts"."domain_id" is null;--> statement-breakpoint
 CREATE UNIQUE INDEX "reserved_local_parts_domain_unique" ON "reserved_local_parts" USING btree ("local_part","domain_id") WHERE "reserved_local_parts"."domain_id" is not null;
