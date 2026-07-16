@@ -56,6 +56,7 @@ import {
   ShieldAlert,
   Tags,
   RefreshCw,
+  ChevronDown,
 } from "lucide-react";
 
 export const Route = createFileRoute("/_app/aliases")({ component: AliasesPage });
@@ -566,43 +567,58 @@ export function AliasesPage() {
         <CreateAliasDialog />
       </div>
 
-      <div className="mb-4 rounded-2xl border border-accent/20 bg-surface/45 p-5 text-sm text-muted-foreground shadow-card">
-        <div className="flex items-center gap-2 font-semibold text-foreground">
-          <ShieldCheck className="h-4 w-4 text-accent" />
-          PGP-encrypted mailbox delivery is available on every plan
+      <details className="group mb-4 rounded-2xl border border-accent/20 bg-surface/45 text-sm text-muted-foreground shadow-card">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl p-5 font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background [&::-webkit-details-marker]:hidden">
+          <ShieldCheck className="h-4 w-4 shrink-0 text-accent" />
+          <span className="flex-1">PGP Gmail Guide</span>
+          <ChevronDown
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+          />
+        </summary>
+        <div className="px-5 pb-5">
+          <div className="font-semibold text-foreground">
+            PGP-encrypted mailbox delivery is available on every plan
+          </div>
+          <p className="mt-2">
+            OpenPGP forwarding uses your recipient public key to encrypt messages before delivery.
+            ShieldMail never needs your private key; keep it in your mail app or browser extension
+            so only you can decrypt protected mail.
+          </p>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-border bg-surface/55 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-accent">
+                Step 1
+              </div>
+              <div className="mt-1 font-medium text-foreground">Create your key</div>
+              <p className="mt-1 text-xs">
+                Install FlowCrypt in Gmail, choose “New encryption key”, set a strong passphrase,
+                and keep the private key inside FlowCrypt.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface/55 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-accent">
+                Step 2
+              </div>
+              <div className="mt-1 font-medium text-foreground">Add the public key</div>
+              <p className="mt-1 text-xs">
+                Copy only the public key block from FlowCrypt, open Recipients in ShieldMail, and
+                paste it into that recipient’s PGP public key field.
+              </p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface/55 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-accent">
+                Step 3
+              </div>
+              <div className="mt-1 font-medium text-foreground">Turn it on per alias</div>
+              <p className="mt-1 text-xs">
+                Set alias PGP mode to Optional or Required. Encrypted mail arrives in Gmail and
+                FlowCrypt decrypts it with your private key/passphrase.
+              </p>
+            </div>
+          </div>
         </div>
-        <p className="mt-2">
-          OpenPGP forwarding uses your recipient public key to encrypt messages before delivery.
-          ShieldMail never needs your private key; keep it in your mail app or browser extension so
-          only you can decrypt protected mail.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-border bg-surface/55 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-accent">Step 1</div>
-            <div className="mt-1 font-medium text-foreground">Create your key</div>
-            <p className="mt-1 text-xs">
-              Install FlowCrypt in Gmail, choose “New encryption key”, set a strong passphrase, and
-              keep the private key inside FlowCrypt.
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-surface/55 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-accent">Step 2</div>
-            <div className="mt-1 font-medium text-foreground">Add the public key</div>
-            <p className="mt-1 text-xs">
-              Copy only the public key block from FlowCrypt, open Recipients in ShieldMail, and
-              paste it into that recipient’s PGP public key field.
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-surface/55 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-accent">Step 3</div>
-            <div className="mt-1 font-medium text-foreground">Turn it on per alias</div>
-            <p className="mt-1 text-xs">
-              Set alias PGP mode to Optional or Required. Encrypted mail arrives in Gmail and
-              FlowCrypt decrypts it with your private key/passphrase.
-            </p>
-          </div>
-        </div>
-      </div>
+      </details>
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
