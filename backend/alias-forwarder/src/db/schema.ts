@@ -1,4 +1,5 @@
-import { bigint, boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid, unique } from 'drizzle-orm/pg-core';
+import { bigint, boolean, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 // ── Users (Stage 1) ─────────────────────────────────────────────────────────
 export const userRoleEnum = pgEnum('user_role', ['admin', 'user']);
@@ -8,15 +9,15 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
-  role: userRoleEnum('role').notNull().default('user'),
-  plan: accountPlanEnum('plan').notNull().default('free'),
   refreshTokenHash: text('refresh_token_hash'),
-  failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
-  lockedUntil: timestamp('locked_until', { withTimezone: true }),
-  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  role: userRoleEnum('role').notNull().default('user'),
+  failedLoginAttempts: integer('failed_login_attempts').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  plan: accountPlanEnum('plan').notNull().default('free'),
 });
 
 // ── Domains (Stage 2) ────────────────────────────────────────────────────────
@@ -85,9 +86,9 @@ export const aliases = pgTable('aliases', {
     .references(() => recipients.id, { onDelete: 'cascade' }),
   localPart: text('local_part').notNull(),
   status: aliasStatusEnum('status').notNull().default('active'),
-  pgpMode: pgpModeEnum('pgp_mode').notNull().default('none'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  pgpMode: pgpModeEnum('pgp_mode').notNull().default('none'),
 }, (t) => [
   unique('aliases_local_part_domain_id_unique').on(t.localPart, t.domainId),
 ]);
@@ -95,20 +96,20 @@ export const aliases = pgTable('aliases', {
 // ── PGP Keys (Stage 10) ───────────────────────────────────────────────────────
 export const pgpKeys = pgTable('pgp_keys', {
   id: uuid('id').defaultRandom().primaryKey(),
-  userId: uuid('user_id')
-    .notNull()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  recipientId: uuid('recipient_id')
-    .notNull()
-    .references(() => recipients.id, { onDelete: 'cascade' })
-    .unique(),
+  userId: uuid('user_id').notNull(),
+  recipientId: uuid('recipient_id').notNull(),
   publicKeyArmored: text('public_key_armored').notNull(),
-  fingerprint: text('fingerprint').notNull().unique(),
+  fingerprint: text('fingerprint').notNull(),
   algorithm: text('algorithm').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  foreignKey({ name: 'pgp_keys_user_id_fkey', columns: [t.userId], foreignColumns: [users.id] }).onDelete('cascade'),
+  foreignKey({ name: 'pgp_keys_recipient_id_fkey', columns: [t.recipientId], foreignColumns: [recipients.id] }).onDelete('cascade'),
+  unique('pgp_keys_recipient_id_key').on(t.recipientId),
+  unique('pgp_keys_fingerprint_key').on(t.fingerprint),
+]);
 
 // ── Mail logs (Stage 4) — metadata only, no body ─────────────────────────────
 export const mailLogStatusEnum = pgEnum('mail_log_status', [
@@ -128,34 +129,33 @@ export const mailLogs = pgTable('mail_logs', {
   forwardedTo: text('forwarded_to'),
   externalMessageId: text('external_message_id'),
   resendMessageId: text('resend_message_id'),
-  outboundProvider: text('outbound_provider'),
-  failureType: text('failure_type'),
-  failureReason: text('failure_reason'),
-  trackingProtection: jsonb('tracking_protection').$type<Record<string, unknown> | null>(),
-  pgpModeUsed: pgpModeEnum('pgp_mode_used').notNull().default('none'),
-  pgpEncrypted: boolean('pgp_encrypted').notNull().default(false),
   status: mailLogStatusEnum('status').notNull().default('queued'),
   rejectionReason: text('rejection_reason'),
   sizeBytes: integer('size_bytes'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  pgpModeUsed: pgpModeEnum('pgp_mode_used').notNull().default('none'),
+  pgpEncrypted: boolean('pgp_encrypted').notNull().default(false),
   authResults: jsonb('auth_results').$type<Record<string, unknown> | null>(),
   authFailureCount: integer('auth_failure_count').notNull().default(0),
   spamScan: jsonb('spam_scan').$type<Record<string, unknown> | null>(),
   spamScore: integer('spam_score').notNull().default(0),
   spamCategory: text('spam_category'),
   spamAction: text('spam_action'),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  outboundProvider: text('outbound_provider'),
+  failureType: text('failure_type'),
+  failureReason: text('failure_reason'),
+  trackingProtection: jsonb('tracking_protection').$type<Record<string, unknown> | null>(),
 });
 
 // ── Sender blocklist (Stage 5) ───────────────────────────────────────────────
 export const senderBlocklists = pgTable('sender_blocklists', {
   id: uuid('id').defaultRandom().primaryKey(),
-  aliasId: uuid('alias_id')
-    .notNull()
-    .references(() => aliases.id, { onDelete: 'cascade' }),
+  aliasId: uuid('alias_id').notNull(),
   senderEmail: text('sender_email').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
+  foreignKey({ name: 'sender_blocklists_alias_id_fkey', columns: [t.aliasId], foreignColumns: [aliases.id] }).onDelete('cascade'),
   unique('sender_blocklists_alias_sender_unique').on(t.aliasId, t.senderEmail),
 ]);
 
@@ -168,36 +168,40 @@ export const suppressionReasonEnum = pgEnum('suppression_reason', [
 
 export const suppressionList = pgTable('suppression_list', {
   id: uuid('id').defaultRandom().primaryKey(),
-  email: text('email').notNull().unique(),
+  email: text('email').notNull(),
   reason: suppressionReasonEnum('reason').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  unique('suppression_list_email_key').on(t.email),
+]);
 
 // ── Audit logs (Stage 12) ────────────────────────────────────────────────────
-export const auditActorTypeEnum = pgEnum('audit_actor_type', ['admin', 'system', 'user']);
+export const actorTypeEnum = pgEnum('actor_type', ['admin', 'system', 'user']);
 
 export const reservedLocalPartActionEnum = pgEnum('reserved_local_part_action', ['reserve', 'allow']);
 
 export const reservedLocalParts = pgTable('reserved_local_parts', {
   id: uuid('id').defaultRandom().primaryKey(),
   localPart: text('local_part').notNull(),
-  domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'cascade' }),
+  domainId: uuid('domain_id'),
   action: reservedLocalPartActionEnum('action').notNull().default('reserve'),
   note: text('note'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  unique('reserved_local_parts_local_part_domain_id_unique').on(t.localPart, t.domainId),
+  foreignKey({ name: 'reserved_local_parts_domain_id_fkey', columns: [t.domainId], foreignColumns: [domains.id] }).onDelete('cascade'),
+  uniqueIndex('reserved_local_parts_global_unique').on(t.localPart).where(sql`${t.domainId} is null`),
+  uniqueIndex('reserved_local_parts_domain_unique').on(t.localPart, t.domainId).where(sql`${t.domainId} is not null`),
 ]);
 
 export const auditLogs = pgTable('audit_logs', {
   id: uuid('id').defaultRandom().primaryKey(),
   timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
-  actorType: auditActorTypeEnum('actor_type').notNull(),
+  actorType: actorTypeEnum('actor_type').notNull(),
   actorId: text('actor_id'),
   action: text('action').notNull(),
   targetType: text('target_type').notNull(),
-  targetId: uuid('target_id').notNull(),
+  targetId: text('target_id').notNull(),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
 });
 
@@ -210,7 +214,7 @@ export const deliveryFailureReasonEnum = pgEnum('delivery_failure_reason', [
 
 export const deliveryFailureLog = pgTable('delivery_failure_log', {
   id: uuid('id').defaultRandom().primaryKey(),
-  aliasId: uuid('alias_id').references(() => aliases.id, { onDelete: 'set null' }),
+  aliasId: uuid('alias_id'),
   /** Full alias address e.g. hello@example.com — kept even if alias is deleted */
   aliasAddress: text('alias_address').notNull(),
   /** Recipient that bounced/complained — metadata only, no body */
@@ -221,7 +225,12 @@ export const deliveryFailureLog = pgTable('delivery_failure_log', {
   /** Short diagnostic string (<=500 chars), no body material */
   failureDetail: text('failure_detail'),
   timestamp: timestamp('timestamp', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  foreignKey({ name: 'delivery_failure_log_alias_id_fkey', columns: [t.aliasId], foreignColumns: [aliases.id] }).onDelete('set null'),
+  index('delivery_failure_log_alias_id_idx').on(t.aliasId),
+  index('delivery_failure_log_reason_idx').on(t.reason),
+  index('delivery_failure_log_timestamp_idx').on(t.timestamp),
+]);
 
 // ── Ops-only TTI checks (Stage 42) — metadata only, no body ──────────────────
 export const ttiCheckStatusEnum = pgEnum('tti_check_status', [
