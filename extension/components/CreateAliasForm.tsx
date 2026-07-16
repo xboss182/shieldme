@@ -47,8 +47,8 @@ export default function CreateAliasForm({ token, onCreated }: Props) {
     if (loaded) return;
     try {
       const [d, r] = await Promise.all([listDomains(token), listRecipients(token)]);
-      const verified = d.filter(x => x.verified);
-      const verifiedR = r.filter(x => x.verified);
+      const verified = d.filter(x => x.status === 'verified');
+      const verifiedR = r.filter(x => x.status === 'verified');
       setDomains(verified);
       setRecipients(verifiedR);
       if (verified.length) setDomainId(verified[0].id);

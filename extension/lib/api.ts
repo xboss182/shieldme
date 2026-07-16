@@ -13,13 +13,14 @@ export interface Alias {
 export interface Domain {
   id: string;
   domain: string;
-  verified: boolean;
+  status: string;
+  isShared?: boolean;
 }
 
 export interface Recipient {
   id: string;
   email: string;
-  verified: boolean;
+  status: string;
 }
 
 export interface AuthTokens {
