@@ -227,24 +227,35 @@ describe('forwarding worker — outbound provider', () => {
     }));
   });
 
-  it('attributes the banner to the actual original sender with zero tracking impact', async () => {
-    mockMailLogsFindFirst.mockResolvedValue(makeLog());
-    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+  it('attributes both banners to the matched inbound alias persisted in the mail log', async () => {
+    mockMailLogsFindFirst.mockResolvedValue({
+      ...makeLog(),
+      envelopeFrom: 'original-sender@senderdomain.test',
+      envelopeTo: 'netflix-2sdf7@shieldme.cc',
+      forwardedTo: 'destination@personal.test',
+    });
+    mockAliasesFindFirst.mockResolvedValue({
+      ...makeAlias('none'),
+      recipient: { id: 'recip-1', email: 'destination@personal.test', status: 'verified', isActive: true },
+    });
     makeUpdateChain();
 
     const processor = getProcessor();
-    await processor(makeJob({ originalFrom: 'actual-sender@senderdomain.test' }));
+    await processor(makeJob({ originalFrom: 'original-sender@senderdomain.test' }));
 
-    expect(mockBuildForwardBanner).toHaveBeenCalledWith({
-      originalSender: 'actual-sender@senderdomain.test',
+    const expectedOptions = {
+      matchedAlias: 'netflix-2sdf7@shieldme.cc',
       dashboardUrl: 'https://app.shieldme.cc/aliases',
       trackingProtection: { enabled: true, pixelsRemoved: 0, linksRewritten: 0 },
-    });
-    expect(mockBuildForwardBannerText).toHaveBeenCalledWith({
-      originalSender: 'actual-sender@senderdomain.test',
-      dashboardUrl: 'https://app.shieldme.cc/aliases',
-      trackingProtection: { enabled: true, pixelsRemoved: 0, linksRewritten: 0 },
-    });
+    };
+    expect(mockBuildForwardBanner).toHaveBeenCalledWith(expectedOptions);
+    expect(mockBuildForwardBannerText).toHaveBeenCalledWith(expectedOptions);
+    expect(mockBuildForwardBanner).not.toHaveBeenCalledWith(expect.objectContaining({
+      matchedAlias: 'original-sender@senderdomain.test',
+    }));
+    expect(mockBuildForwardBanner).not.toHaveBeenCalledWith(expect.objectContaining({
+      matchedAlias: 'destination@personal.test',
+    }));
   });
 
   it('passes nonzero tracking cleanup results to the unified banner', async () => {

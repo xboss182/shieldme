@@ -138,7 +138,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         linksRewritten: trackingProtection.metadata.linksRewritten,
       }
     : undefined;
-  const bannerOpts = { originalSender: originalFrom, dashboardUrl, trackingProtection: trackingNotice };
+  const bannerOpts = { matchedAlias: log.envelopeTo, dashboardUrl, trackingProtection: trackingNotice };
   const bannerHtml = buildForwardBanner(bannerOpts);
   const bannerText = buildForwardBannerText(bannerOpts);
   const composedText = bannerText + rawText;

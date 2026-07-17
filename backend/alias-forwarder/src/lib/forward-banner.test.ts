@@ -2,28 +2,45 @@ import { describe, expect, it } from 'vitest';
 import { buildForwardBanner, buildForwardBannerText } from './forward-banner.js';
 
 const baseOptions = {
-  originalSender: 'sender@senderdomain.test',
+  matchedAlias: 'netflix-2sdf7@shieldme.cc',
   dashboardUrl: 'https://app.shieldme.cc/aliases',
 };
 
 describe('forward banner', () => {
-  it('renders one responsive green banner with the original sender and dashboard action', () => {
+  it('renders the matched alias, brand, and unchanged Dashboard action in one inline flow', () => {
     const html = buildForwardBanner(baseOptions);
     const text = buildForwardBannerText(baseOptions);
 
     expect(html.match(/background:#ecfdf5/g)).toHaveLength(1);
     expect(html).not.toContain('background:#f4f4f5');
-    expect(html).toContain('width="100%"');
-    expect(html).toContain('word-break:break-word');
-    expect(html).toContain('Forwarded from <strong>sender@senderdomain.test</strong>');
-    expect(html).toContain('&middot; by <strong>ShieldMe.cc</strong>');
-    expect(html).toContain('href="https://app.shieldme.cc/aliases"');
-    expect(html).toContain('Open in Dashboard');
-    expect(text).toContain('Forwarded from sender@senderdomain.test · by ShieldMe.cc');
+    expect(html).toContain('Forwarded from <strong');
+    expect(html).toContain('netflix-2sdf7@shieldme.cc</strong> &middot; by <strong>ShieldMe.cc</strong>');
+    expect(html).toContain('href="https://app.shieldme.cc/aliases" target="_blank" rel="noopener noreferrer"');
+    expect(html).toMatch(/>\s*Dashboard\s*<\/a>/);
+    expect(html).not.toContain('Open in Dashboard');
+    expect(html).not.toMatch(/<\/span>\s*<\/div>[\s\S]*<a /);
+    expect(text).toContain('Forwarded from netflix-2sdf7@shieldme.cc · by ShieldMe.cc');
     expect(text).toContain('Dashboard: https://app.shieldme.cc/aliases');
   });
 
-  it('omits all tracking wording when protection has zero impact', () => {
+  it('uses email-safe natural wrapping without clipping or forced no-wrap behavior', () => {
+    const html = buildForwardBanner({
+      ...baseOptions,
+      matchedAlias: 'a-very-long-generated-alias-that-must-wrap-safely-2sdf7@shieldme.cc',
+    });
+
+    expect(html).toContain('width="100%"');
+    expect(html).toContain('max-width:100%');
+    expect(html).toContain('table-layout:fixed');
+    expect(html).toContain('box-sizing:border-box');
+    expect(html).toContain('overflow-wrap:anywhere');
+    expect(html).toContain('word-break:break-word');
+    expect(html).not.toContain('white-space:nowrap');
+    expect(html).not.toContain('overflow:hidden');
+    expect(html).not.toContain('<br');
+  });
+
+  it('omits all tracking wording and its separator when protection has zero impact', () => {
     const options = {
       ...baseOptions,
       trackingProtection: { enabled: true, pixelsRemoved: 0, linksRewritten: 0 },
@@ -37,42 +54,35 @@ describe('forward banner', () => {
     expect(html).not.toContain('0 cleaned links');
     expect(text).not.toContain('0 tracking pixels');
     expect(text).not.toContain('0 cleaned links');
-  });
-
-  it('renders truthful nonzero pixel and link counts inside the unified banner', () => {
-    const options = {
-      ...baseOptions,
-      trackingProtection: { enabled: true, pixelsRemoved: 2, linksRewritten: 1 },
-    };
-    const html = buildForwardBanner(options);
-    const text = buildForwardBannerText(options);
-
-    expect(html.match(/background:#ecfdf5/g)).toHaveLength(1);
-    expect(html).toContain('Tracking protection:');
-    expect(html).toContain('removed 2 tracking pixels and cleaned 1 link');
-    expect(text).toContain('Tracking protection: removed 2 tracking pixels and cleaned 1 link.');
+    expect(html.match(/&middot;/g)).toHaveLength(2);
+    expect(text.match(/ · /g)).toHaveLength(2);
+    expect(text).not.toContain('ShieldMe.cc · · Dashboard');
   });
 
   it.each([
     [{ enabled: true, pixelsRemoved: 1, linksRewritten: 0 }, 'removed 1 tracking pixel', 'cleaned'],
     [{ enabled: true, pixelsRemoved: 0, linksRewritten: 3 }, 'cleaned 3 links', 'removed'],
-  ])('renders only the nonzero tracking result', (trackingProtection, included, omitted) => {
+    [{ enabled: true, pixelsRemoved: 2, linksRewritten: 1 }, 'removed 2 tracking pixels and cleaned 1 link', ''],
+  ])('renders only truthful nonzero tracking results', (trackingProtection, included, omitted) => {
     const html = buildForwardBanner({ ...baseOptions, trackingProtection });
     const text = buildForwardBannerText({ ...baseOptions, trackingProtection });
 
-    expect(html).toContain(included);
-    expect(text).toContain(included);
-    expect(html).not.toContain(omitted);
-    expect(text).not.toContain(omitted);
+    expect(html).toContain(`&middot; <strong>Tracking protection:</strong> ${included}`);
+    expect(text).toContain(`· Tracking protection: ${included}`);
+    if (omitted) {
+      expect(html).not.toContain(omitted);
+      expect(text).not.toContain(omitted);
+    }
   });
 
-  it('escapes sender and dashboard values in HTML', () => {
+  it('escapes the matched alias and dashboard destination in HTML', () => {
     const html = buildForwardBanner({
-      originalSender: 'sender+<tag>@senderdomain.test',
+      matchedAlias: 'netflix+<tag>@shieldme.cc',
       dashboardUrl: 'https://app.shieldme.cc/aliases?filter="active"&sort=newest',
     });
 
-    expect(html).toContain('sender+&lt;tag&gt;@senderdomain.test');
+    expect(html).toContain('netflix+&lt;tag&gt;@shieldme.cc');
     expect(html).toContain('filter=&quot;active&quot;&amp;sort=newest');
+    expect(html).not.toContain('netflix+<tag>@shieldme.cc');
   });
 });
