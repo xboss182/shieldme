@@ -147,6 +147,31 @@ describe('handleInbound', () => {
     expect(mockScanInboundMail).toHaveBeenCalledOnce();
   });
 
+  it('persists the matched SMTP alias and queues its authoritative mail-log reference', async () => {
+    const matchedAlias = 'netflix-2sdf7@shieldme.cc';
+    mockDomainsFind.mockResolvedValue(makeDomain({ domain: 'shieldme.cc' }));
+    mockAliasesFind.mockResolvedValue(makeAlias({ localPart: 'netflix-2sdf7' }));
+
+    await handleInbound({
+      from: 'original-sender@senderdomain.test',
+      to: matchedAlias,
+      subject: 'Subscription notice',
+    });
+
+    expect(mockInsertValues).toHaveBeenCalledWith(expect.objectContaining({
+      aliasId: ALIAS_ID,
+      envelopeFrom: 'original-sender@senderdomain.test',
+      envelopeTo: matchedAlias,
+      forwardedTo: 'user@personal.com',
+      status: 'queued',
+    }));
+    expect(mockBuildEncryptedEmailForwardingJob).toHaveBeenCalledWith(expect.objectContaining({
+      aliasId: ALIAS_ID,
+      messageId: LOG_ID,
+      originalFrom: 'original-sender@senderdomain.test',
+    }));
+  });
+
   it('stores parsed mail authentication results without rejecting the message', async () => {
     mockDomainsFind.mockResolvedValue(makeDomain());
     mockAliasesFind.mockResolvedValue(makeAlias());
