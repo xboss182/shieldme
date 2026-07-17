@@ -4,7 +4,7 @@ export interface AuthState {
   email: string;
 }
 
-export const authStorage = storage.defineItem<AuthState | null>('local:auth', {
+export const authStorage = storage.defineItem<AuthState | null>("local:auth", {
   defaultValue: null,
 });
 

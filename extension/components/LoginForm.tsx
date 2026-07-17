@@ -1,27 +1,27 @@
-import React, { useState } from 'react';
-import { login } from '../lib/api';
-import { setAuth } from '../lib/storage';
+import React, { useState } from "react";
+import { login } from "../lib/api";
+import { setAuth } from "../lib/storage";
 
 interface Props {
   onLogin: () => void;
 }
 
 export default function LoginForm({ onLogin }: Props) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setError("");
     setLoading(true);
     try {
       const tokens = await login(email, password);
       await setAuth({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, email });
       onLogin();
-    } catch (err: any) {
-      setError(err.message ?? 'Login failed');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
     }
@@ -43,7 +43,7 @@ export default function LoginForm({ onLogin }: Props) {
           <input
             type="email"
             value={email}
-            onChange={e => setEmail(e.target.value)}
+            onChange={(e) => setEmail(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-shield-500"
             placeholder="you@example.com"
             required
@@ -55,7 +55,7 @@ export default function LoginForm({ onLogin }: Props) {
           <input
             type="password"
             value={password}
-            onChange={e => setPassword(e.target.value)}
+            onChange={(e) => setPassword(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-shield-500"
             placeholder="••••••••••••"
             required
@@ -67,7 +67,7 @@ export default function LoginForm({ onLogin }: Props) {
           disabled={loading}
           className="w-full py-2 px-4 bg-shield-600 hover:bg-shield-700 text-white text-sm font-medium rounded-md disabled:opacity-50 transition-colors"
         >
-          {loading ? 'Signing in…' : 'Sign in'}
+          {loading ? "Signing in…" : "Sign in"}
         </button>
       </form>
     </div>
