@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import { createAlias, listDomains, listRecipients, Domain, Recipient } from "../lib/api";
 
 interface Props {
@@ -59,7 +59,7 @@ export default function CreateAliasForm({ token, onCreated }: Props) {
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     if (loaded) return;
     try {
       const [d, r] = await Promise.all([listDomains(token), listRecipients(token)]);
@@ -70,14 +70,14 @@ export default function CreateAliasForm({ token, onCreated }: Props) {
       if (verified.length) setDomainId(verified[0].id);
       if (verifiedR.length) setRecipientId(verifiedR[0].id);
       setLoaded(true);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load");
     }
-  }
+  }, [token, loaded]);
 
   React.useEffect(() => {
     load();
-  }, []);
+  }, [load]);
 
   React.useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
@@ -87,7 +87,9 @@ export default function CreateAliasForm({ token, onCreated }: Props) {
           serviceLabelFromHostname(new URL(tab.url).hostname),
         );
         if (generated) setLocalPart(generated);
-      } catch {}
+      } catch {
+        /* URL parse failure — ignore */
+      }
     });
   }, []);
 
@@ -100,8 +102,8 @@ export default function CreateAliasForm({ token, onCreated }: Props) {
       const address = alias.address ?? `${alias.localPart}@${alias.domain}`;
       await navigator.clipboard.writeText(address);
       onCreated(address);
-    } catch (err: any) {
-      const message = err.message ?? "Failed to create alias";
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to create alias";
       setError(
         message.toLowerCase().includes("already exists") ||
           message.toLowerCase().includes("reserved")

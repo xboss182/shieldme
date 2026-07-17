@@ -20,8 +20,8 @@ export default function LoginForm({ onLogin }: Props) {
       const tokens = await login(email, password);
       await setAuth({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, email });
       onLogin();
-    } catch (err: any) {
-      setError(err.message ?? "Login failed");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Login failed");
     } finally {
       setLoading(false);
     }

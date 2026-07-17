@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { listAliases, enableAlias, disableAlias, Alias } from "../lib/api";
 
 interface Props {
@@ -13,22 +13,22 @@ export default function AliasList({ token, refreshTrigger }: Props) {
   const [toggling, setToggling] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const list = await listAliases(token);
       setAliases(list.slice(0, 10));
-    } catch (err: any) {
-      setError(err.message ?? "Failed to load aliases");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load aliases");
     } finally {
       setLoading(false);
     }
-  }
+  }, [token]);
 
   useEffect(() => {
     load();
-  }, [refreshTrigger]);
+  }, [refreshTrigger, load]);
 
   async function toggle(alias: Alias) {
     setToggling(alias.id);
@@ -37,8 +37,8 @@ export default function AliasList({ token, refreshTrigger }: Props) {
         ? await disableAlias(token, alias.id)
         : await enableAlias(token, alias.id);
       setAliases((prev) => prev.map((a) => (a.id === alias.id ? updated : a)));
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Toggle failed");
     } finally {
       setToggling(null);
     }
