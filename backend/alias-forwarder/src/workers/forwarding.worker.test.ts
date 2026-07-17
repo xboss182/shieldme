@@ -15,6 +15,8 @@ const {
   mockAssertMonthlyForwardAllowed,
   mockAssertOutboundProviderAllowed,
   mockDecryptQueuePayload,
+  mockBuildForwardBanner,
+  mockBuildForwardBannerText,
 } = vi.hoisted(() => ({
   mockMailLogsFindFirst: vi.fn(),
   mockAliasesFindFirst: vi.fn(),
@@ -29,6 +31,8 @@ const {
   mockAssertMonthlyForwardAllowed: vi.fn().mockResolvedValue(undefined),
   mockAssertOutboundProviderAllowed: vi.fn().mockResolvedValue(undefined),
   mockDecryptQueuePayload: vi.fn((data) => data),
+  mockBuildForwardBanner: vi.fn().mockReturnValue('<banner/>'),
+  mockBuildForwardBannerText: vi.fn().mockReturnValue('[banner] '),
 }));
 
 vi.mock('../db/client.js', () => ({
@@ -75,8 +79,8 @@ vi.mock('../modules/spam/spam-scanner.service.js', () => ({
 }));
 
 vi.mock('../lib/forward-banner.js', () => ({
-  buildForwardBanner: vi.fn().mockReturnValue('<banner/>'),
-  buildForwardBannerText: vi.fn().mockReturnValue('[banner] '),
+  buildForwardBanner: mockBuildForwardBanner,
+  buildForwardBannerText: mockBuildForwardBannerText,
 }));
 
 vi.mock('../lib/redis.js', () => ({ redis: {} }));
@@ -170,6 +174,8 @@ function makeJob(overrides = {}) {
 describe('forwarding worker — outbound provider', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockBuildForwardBanner.mockReturnValue('<banner/>');
+    mockBuildForwardBannerText.mockReturnValue('[banner] ');
     mockIsOutboundConfigured.mockReturnValue(true);
     mockSendOutbound.mockResolvedValue('outbound-msg-id');
     mockGetPlatformDomain.mockReturnValue('shieldme.cc');
@@ -220,11 +226,48 @@ describe('forwarding worker — outbound provider', () => {
       'X-ShieldMe-Spam-Action': 'tag',
     }));
   });
+
+  it('attributes the banner to the actual original sender with zero tracking impact', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    makeUpdateChain();
+
+    const processor = getProcessor();
+    await processor(makeJob({ originalFrom: 'actual-sender@senderdomain.test' }));
+
+    expect(mockBuildForwardBanner).toHaveBeenCalledWith({
+      originalSender: 'actual-sender@senderdomain.test',
+      dashboardUrl: 'https://app.shieldme.cc/aliases',
+      trackingProtection: { enabled: true, pixelsRemoved: 0, linksRewritten: 0 },
+    });
+    expect(mockBuildForwardBannerText).toHaveBeenCalledWith({
+      originalSender: 'actual-sender@senderdomain.test',
+      dashboardUrl: 'https://app.shieldme.cc/aliases',
+      trackingProtection: { enabled: true, pixelsRemoved: 0, linksRewritten: 0 },
+    });
+  });
+
+  it('passes nonzero tracking cleanup results to the unified banner', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    makeUpdateChain();
+
+    const processor = getProcessor();
+    await processor(makeJob({
+      htmlBody: '<img src="https://tracker.test/open.gif" width="1" height="1"><a href="https://sender.test/story?utm_source=email">Read</a>',
+    }));
+
+    expect(mockBuildForwardBanner).toHaveBeenCalledWith(expect.objectContaining({
+      trackingProtection: { enabled: true, pixelsRemoved: 1, linksRewritten: 1 },
+    }));
+  });
 });
 
 describe('forwarding worker — pgpMode enforcement', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    mockBuildForwardBanner.mockReturnValue('<banner/>');
+    mockBuildForwardBannerText.mockReturnValue('[banner] ');
     mockIsOutboundConfigured.mockReturnValue(true);
     mockSendOutbound.mockResolvedValue('outbound-msg-id');
     mockGetPlatformDomain.mockReturnValue('shieldme.cc');

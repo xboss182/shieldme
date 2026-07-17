@@ -117,7 +117,6 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   const baseSubject = payload.subject ?? `[Forwarded] Message to ${log.envelopeTo}`;
   const subject = spamScan ? tagSubject(baseSubject, spamScan) : baseSubject;
 
-  const aliasAddress = log.envelopeTo;
   const dashboardUrl = `https://app.${platformDomain}/aliases`;
 
   const rawText = payload.textBody ?? [
@@ -139,7 +138,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         linksRewritten: trackingProtection.metadata.linksRewritten,
       }
     : undefined;
-  const bannerOpts = { aliasAddress, originalSender: originalFrom, dashboardUrl, trackingProtection: trackingNotice };
+  const bannerOpts = { originalSender: originalFrom, dashboardUrl, trackingProtection: trackingNotice };
   const bannerHtml = buildForwardBanner(bannerOpts);
   const bannerText = buildForwardBannerText(bannerOpts);
   const composedText = bannerText + rawText;
