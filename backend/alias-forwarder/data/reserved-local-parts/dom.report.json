@@ -1,0 +1,40 @@
+{
+  "batchId": "dom-20260718-6cf9ba0627cc",
+  "sourcePath": "data/reserved-local-parts/dom.txt",
+  "sha256": "6cf9ba0627cc29a3ae32e0c4d32a0bd742ef050d198be805bf1cbed837fd08f6",
+  "physicalLines": 2425,
+  "blankLines": 1212,
+  "nonEmptyLines": 1213,
+  "uniqueNormalized": 1212,
+  "duplicateOccurrences": 1,
+  "lowercaseChanges": 1,
+  "trimChanges": 0,
+  "rejectedEntries": 0,
+  "minLength": 1,
+  "maxLength": 37,
+  "duplicates": [
+    {
+      "normalized": "vestorado",
+      "firstLine": 2215,
+      "duplicateLine": 2217
+    }
+  ],
+  "lowercased": [
+    {
+      "line": 1869,
+      "value": "Slack",
+      "normalized": "slack"
+    }
+  ],
+  "trimmed": [],
+  "rejects": [],
+  "staticFallbackOverlapCount": 6,
+  "staticFallbackOverlaps": [
+    "accounts",
+    "billing",
+    "demo",
+    "dev",
+    "support",
+    "system"
+  ]
+}

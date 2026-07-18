@@ -28,6 +28,18 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
+export class ExtensionApiError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ExtensionApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function request<T>(path: string, token: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -38,8 +50,11 @@ async function request<T>(path: string, token: string, options: RequestInit = {}
     },
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? `HTTP ${res.status}`);
+    const err = (await res.json().catch(() => ({ error: res.statusText }))) as {
+      error?: string;
+      code?: string;
+    };
+    throw new ExtensionApiError(err.error ?? `HTTP ${res.status}`, res.status, err.code);
   }
   if (res.status === 204) return undefined as T;
   return res.json();

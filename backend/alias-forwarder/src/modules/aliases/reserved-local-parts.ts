@@ -1,3 +1,5 @@
+import { normalizeLocalPart } from './local-part.js';
+
 const RESERVED_LOCAL_PARTS = new Set([
   // RFC / operational mailboxes
   'abuse', 'postmaster', 'hostmaster', 'webmaster', 'noc', 'security', 'ssladmin', 'ssladministrator',
@@ -31,19 +33,16 @@ export type ReservedLocalPartRule = {
   action: ReservedLocalPartAction;
 };
 
-export function normalizeLocalPart(localPart: string) {
-  return localPart.trim().toLowerCase();
-}
-
-function ruleApplies(rule: ReservedLocalPartRule, domainId?: string | null) {
-  return rule.domainId == null || rule.domainId === domainId;
-}
+export { normalizeLocalPart } from './local-part.js';
 
 export function resolveReservedLocalPart(localPart: string, rules: ReservedLocalPartRule[] = [], domainId?: string | null) {
   const normalized = normalizeLocalPart(localPart);
-  const exactRule = rules.find((rule) => normalizeLocalPart(rule.localPart) === normalized && ruleApplies(rule, domainId));
-  if (exactRule) {
-    return { reserved: exactRule.action === 'reserve', source: 'rule' as const, localPart: normalized };
+  const matchingRules = rules.filter((rule) => normalizeLocalPart(rule.localPart) === normalized);
+  const domainRule = matchingRules.find((rule) => rule.domainId != null && rule.domainId === domainId);
+  const globalRule = matchingRules.find((rule) => rule.domainId == null);
+  const effectiveRule = domainRule ?? globalRule;
+  if (effectiveRule) {
+    return { reserved: effectiveRule.action === 'reserve', source: 'rule' as const, localPart: normalized };
   }
   return { reserved: RESERVED_LOCAL_PARTS.has(normalized), source: 'static' as const, localPart: normalized };
 }

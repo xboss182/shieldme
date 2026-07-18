@@ -1,7 +1,8 @@
-import { and, count, desc, eq, gte, ilike, isNotNull, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, ilike, sql } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { aliases, auditLogs, domains, mailLogs, recipients, reservedLocalParts, users } from '../../db/schema.js';
 import { emailForwardingQueue } from '../../queues/email-jobs.js';
+import { isValidLocalPart, normalizeLocalPart } from '../aliases/local-part.js';
 
 export class AdminError extends Error {
   constructor(message: string, public statusCode = 400) { super(message); }
@@ -162,20 +163,24 @@ export async function listReservedLocalParts(query: { search?: string; domainId?
   if (query.search) filters.push(ilike(reservedLocalParts.localPart, `%${query.search}%`));
   if (query.domainId) filters.push(eq(reservedLocalParts.domainId, query.domainId));
   if (query.action === 'reserve' || query.action === 'allow') filters.push(eq(reservedLocalParts.action, query.action));
-  const rows = await db
-    .select({ id: reservedLocalParts.id, localPart: reservedLocalParts.localPart, domainId: reservedLocalParts.domainId, domain: domains.domain, action: reservedLocalParts.action, note: reservedLocalParts.note, createdAt: reservedLocalParts.createdAt, updatedAt: reservedLocalParts.updatedAt })
-    .from(reservedLocalParts)
-    .leftJoin(domains, eq(domains.id, reservedLocalParts.domainId))
-    .where(filters.length ? and(...filters) : undefined)
-    .orderBy(desc(reservedLocalParts.createdAt))
-    .limit(l)
-    .offset(offset(p, l));
-  return { reservedLocalParts: rows, page: p, limit: l };
+  const where = filters.length ? and(...filters) : undefined;
+  const [rows, [totalRow]] = await Promise.all([
+    db
+      .select({ id: reservedLocalParts.id, localPart: reservedLocalParts.localPart, domainId: reservedLocalParts.domainId, domain: domains.domain, action: reservedLocalParts.action, note: reservedLocalParts.note, sourceBatch: reservedLocalParts.sourceBatch, sourceSha256: reservedLocalParts.sourceSha256, createdAt: reservedLocalParts.createdAt, updatedAt: reservedLocalParts.updatedAt })
+      .from(reservedLocalParts)
+      .leftJoin(domains, eq(domains.id, reservedLocalParts.domainId))
+      .where(where)
+      .orderBy(reservedLocalParts.localPart, reservedLocalParts.domainId)
+      .limit(l)
+      .offset(offset(p, l)),
+    db.select({ count: count() }).from(reservedLocalParts).where(where),
+  ]);
+  return { reservedLocalParts: rows, page: p, limit: l, total: Number(totalRow?.count ?? 0) };
 }
 
 export async function createReservedLocalPart(input: { localPart: string; domainId?: string | null; action: 'reserve' | 'allow'; note?: string | null }) {
-  const localPart = input.localPart.trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$|^[a-z0-9]$/.test(localPart)) throw new AdminError('Invalid local-part', 400);
+  const localPart = normalizeLocalPart(input.localPart);
+  if (!isValidLocalPart(localPart)) throw new AdminError('Invalid local-part', 400);
   const [row] = await db.insert(reservedLocalParts).values({ localPart, domainId: input.domainId ?? null, action: input.action, note: input.note ?? null }).returning();
   await writeAuditLog(input.action === 'allow' ? 'reserved_alias.allowed' : 'reserved_alias.reserved', 'reserved_local_part', row.id, { localPart, domainId: row.domainId, note: row.note });
   return row;

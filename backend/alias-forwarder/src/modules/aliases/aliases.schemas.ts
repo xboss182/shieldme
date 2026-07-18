@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import { isValidLocalPart, normalizeLocalPart } from './local-part.js';
 
-// local-part: RFC 5321 simplified — alphanumeric, dots, hyphens, underscores, 1-64 chars
-const localPartRegex = /^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$|^[a-z0-9]$/;
-
-const localPartSchema = z.string().min(1).max(64).toLowerCase().refine((v) => localPartRegex.test(v), {
-  message: 'Invalid local-part: use lowercase letters, digits, dots, hyphens, underscores (1-64 chars)',
-});
+const localPartSchema = z
+  .string()
+  .transform(normalizeLocalPart)
+  .pipe(z.string().min(1).max(64).refine(isValidLocalPart, {
+    message: 'Invalid local-part: use lowercase letters, digits, dots, hyphens, underscores (1-64 chars)',
+  }));
 
 export const createAliasSchema = z.object({
   localPart: localPartSchema.optional(),

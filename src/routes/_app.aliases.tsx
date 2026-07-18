@@ -2,14 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { createAliasPayload } from "../lib/alias-create-payload";
-import {
-  aliasesApi,
-  aliasesPgpApi,
-  domainsApi,
-  recipientsApi,
-  ApiError,
-  type Alias,
-} from "../lib/api";
+import { aliasCreationErrorMessage } from "../lib/alias-create-error";
+import { aliasesApi, aliasesPgpApi, domainsApi, recipientsApi, type Alias } from "../lib/api";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -190,15 +184,7 @@ function CreateAliasDialog() {
       setRecipientId("");
       setPgpMode("none");
     },
-    onError: (e) => {
-      const message = e instanceof ApiError ? e.message : "Failed to create alias";
-      setError(
-        message.toLowerCase().includes("already exists") ||
-          message.toLowerCase().includes("reserved")
-          ? message + ". Please choose a different alias name."
-          : message,
-      );
-    },
+    onError: (error) => setError(aliasCreationErrorMessage(error)),
   });
   return (
     <Dialog open={open} onOpenChange={setOpen}>

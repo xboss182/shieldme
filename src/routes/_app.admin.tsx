@@ -441,25 +441,40 @@ function ReservedAliases({
   search: string;
   onError: (m: string) => void;
 }) {
-  const { data, loading, reload } = useAdminData<{ reservedLocalParts: ReservedLocalPart[] }>(
-    () => adminApi.reservedLocalParts(search, secret),
-    [search, secret],
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+  useEffect(() => setPage(1), [search]);
+  const { data, loading, reload } = useAdminData<{
+    reservedLocalParts: ReservedLocalPart[];
+    page: number;
+    limit: number;
+    total: number;
+  }>(
+    () => adminApi.reservedLocalParts(search, page, pageSize, secret),
+    [search, page, secret],
     onError,
   );
   const [localPart, setLocalPart] = useState("");
   const [domainId, setDomainId] = useState("");
   const [action, setAction] = useState<"reserve" | "allow">("reserve");
   const [note, setNote] = useState("");
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    await adminApi.createReservedLocalPart(
-      { localPart, domainId: domainId.trim() || null, action, note: note.trim() || null },
-      secret,
-    );
-    setLocalPart("");
-    setDomainId("");
-    setNote("");
-    reload();
+    try {
+      await adminApi.createReservedLocalPart(
+        { localPart, domainId: domainId.trim() || null, action, note: note.trim() || null },
+        secret,
+      );
+      setLocalPart("");
+      setDomainId("");
+      setNote("");
+      setPage(1);
+      reload();
+    } catch (error) {
+      onError(error instanceof ApiError ? error.message : "Failed to add reserved rule");
+    }
   };
   return (
     <div className="space-y-4">
@@ -499,9 +514,15 @@ function ReservedAliases({
           </form>
         </CardContent>
       </Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+        <span>{total.toLocaleString()} reserved rules</span>
+        <span>
+          Page {page} of {totalPages}
+        </span>
+      </div>
       <TableCard
         title="Reserved rules"
-        headers={["Local-part", "Scope", "Action", "Note", "Action"]}
+        headers={["Local-part", "Scope", "Action", "Source", "Note", "Action"]}
         loading={loading}
         rows={data?.reservedLocalParts ?? []}
         render={(r: ReservedLocalPart) => (
@@ -511,12 +532,24 @@ function ReservedAliases({
             <td>
               <Badge variant={r.action === "allow" ? "outline" : "secondary"}>{r.action}</Badge>
             </td>
+            <td>{r.sourceBatch ?? "Manual"}</td>
             <td>{r.note ?? "—"}</td>
             <td>
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={() => adminApi.deleteReservedLocalPart(r.id, secret).then(reload)}
+                onClick={() =>
+                  adminApi
+                    .deleteReservedLocalPart(r.id, secret)
+                    .then(reload)
+                    .catch((error) =>
+                      onError(
+                        error instanceof ApiError
+                          ? error.message
+                          : "Failed to delete reserved rule",
+                      ),
+                    )
+                }
               >
                 Delete
               </Button>
@@ -524,6 +557,22 @@ function ReservedAliases({
           </>
         )}
       />
+      <div className="flex justify-end gap-2">
+        <Button
+          variant="outline"
+          disabled={page <= 1 || loading}
+          onClick={() => setPage((p) => p - 1)}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          disabled={page >= totalPages || loading}
+          onClick={() => setPage((p) => p + 1)}
+        >
+          Next
+        </Button>
+      </div>
     </div>
   );
 }

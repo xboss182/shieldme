@@ -15,6 +15,10 @@
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",
     "test:watch": "vitest",
+    "reserved:generate": "tsx src/scripts/generate-reserved-local-parts.ts",
+    "reserved:check": "tsx src/scripts/generate-reserved-local-parts.ts --check",
+    "reserved:apply": "tsx src/scripts/apply-reserved-local-parts.ts",
+    "reserved:collisions": "tsx src/scripts/report-reserved-local-part-collisions.ts",
     "security:audit": "npm audit --audit-level=high",
     "audit": "npm audit --omit=dev --audit-level=high"
   },
@@ -62,6 +66,7 @@
     "vitest": "4.1.10"
   },
   "overrides": {
+    "adm-zip": "0.6.0",
     "node-fetch": "2.7.0",
     "nodemailer": "9.0.3",
     "tar": "7.5.19",

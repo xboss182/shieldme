@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { createAlias, listDomains, listRecipients, Domain, Recipient } from "../lib/api";
+import { aliasCreationErrorMessage } from "../lib/alias-create-error";
 
 interface Props {
   token: string;
@@ -102,14 +103,8 @@ export default function CreateAliasForm({ token, onCreated }: Props) {
       const address = alias.address ?? `${alias.localPart}@${alias.domain}`;
       await navigator.clipboard.writeText(address);
       onCreated(address);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to create alias";
-      setError(
-        message.toLowerCase().includes("already exists") ||
-          message.toLowerCase().includes("reserved")
-          ? `${message}. Regenerate or edit the alias name and try again.`
-          : message,
-      );
+    } catch (error: unknown) {
+      setError(aliasCreationErrorMessage(error));
     } finally {
       setLoading(false);
     }

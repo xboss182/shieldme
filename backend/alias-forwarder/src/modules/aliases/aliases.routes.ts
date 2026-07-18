@@ -94,7 +94,7 @@ aliasesRouter.delete('/:id', async (req: Request, res: Response, next: NextFunct
 
 export function aliasErrorHandler(err: unknown, _req: Request, res: Response, next: NextFunction) {
   if (err instanceof AliasError) {
-    return res.status(err.statusCode).json({ error: err.message });
+    return res.status(err.statusCode).json({ error: err.message, ...(err.code ? { code: err.code } : {}) });
   }
   return next(err);
 }

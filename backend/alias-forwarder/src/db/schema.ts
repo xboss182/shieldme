@@ -186,12 +186,15 @@ export const reservedLocalParts = pgTable('reserved_local_parts', {
   domainId: uuid('domain_id'),
   action: reservedLocalPartActionEnum('action').notNull().default('reserve'),
   note: text('note'),
+  sourceBatch: text('source_batch'),
+  sourceSha256: text('source_sha256'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   foreignKey({ name: 'reserved_local_parts_domain_id_fkey', columns: [t.domainId], foreignColumns: [domains.id] }).onDelete('cascade'),
   uniqueIndex('reserved_local_parts_global_unique').on(t.localPart).where(sql`${t.domainId} is null`),
   uniqueIndex('reserved_local_parts_domain_unique').on(t.localPart, t.domainId).where(sql`${t.domainId} is not null`),
+  index('reserved_local_parts_source_batch_idx').on(t.sourceBatch).where(sql`${t.sourceBatch} is not null`),
 ]);
 
 export const auditLogs = pgTable('audit_logs', {
