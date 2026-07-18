@@ -78,7 +78,9 @@ import {
   enableAlias,
   disableAlias,
   deleteAlias,
+  updateAlias,
   AliasError,
+  isReservedAliasDatabaseError,
   getAliasProtection,
   getAliasStats,
   generateAliasLocalPart,
@@ -116,6 +118,12 @@ function makeRecipientRow(overrides = {}) {
 function mockInsertChain(returning: unknown[]) {
   mockInsert.mockReturnValue({
     values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue(returning) }),
+  });
+}
+
+function mockInsertError(error: unknown) {
+  mockInsert.mockReturnValue({
+    values: vi.fn().mockReturnValue({ returning: vi.fn().mockRejectedValue(error) }),
   });
 }
 
@@ -195,6 +203,38 @@ describe('generated alias names', () => {
   });
 });
 
+describe('isReservedAliasDatabaseError', () => {
+  it('recognizes a guard error through a bounded cause chain', () => {
+    const postgresError = Object.assign(new Error('SHIELDME_RESERVED_ALIAS'), {
+      code: '23514',
+      constraint: 'aliases_reserved_local_part_guard',
+    });
+    const wrapped = Array.from({ length: 8 }).reduce<Error>((cause) => {
+      const error = new Error('Drizzle query failed');
+      error.cause = cause;
+      return error;
+    }, postgresError);
+
+    expect(isReservedAliasDatabaseError(wrapped)).toBe(true);
+  });
+
+  it('stops safely on cyclic and over-depth cause chains', () => {
+    const cyclic = new Error('cyclic');
+    cyclic.cause = cyclic;
+    const chain = Array.from({ length: 9 }).reduce<Error>((cause) => {
+      const error = new Error('wrapped');
+      error.cause = cause;
+      return error;
+    }, Object.assign(new Error('SHIELDME_RESERVED_ALIAS'), {
+      code: '23514',
+      constraint: 'aliases_reserved_local_part_guard',
+    }));
+
+    expect(isReservedAliasDatabaseError(cyclic)).toBe(false);
+    expect(isReservedAliasDatabaseError(chain)).toBe(false);
+  });
+});
+
 // ── createAlias ───────────────────────────────────────────────────────────────
 describe('createAlias', () => {
   it('creates an alias and returns address', async () => {
@@ -236,10 +276,14 @@ describe('createAlias', () => {
     expect(mockFindFirst).toHaveBeenCalledTimes(5);
   });
 
-  it('rejects reserved operational/security local-parts', async () => {
+  it('rejects reserved operational/security local-parts with a stable code', async () => {
     await expect(
       createAlias(OWNER_ID, { localPart: 'admin', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID }),
-    ).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining('reserved') });
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      code: 'RESERVED_ALIAS',
+      message: expect.stringContaining('different alias name'),
+    });
     expect(mockInsert).not.toHaveBeenCalled();
   });
 
@@ -263,6 +307,28 @@ describe('createAlias', () => {
     const { createAliasSchema } = await import('./aliases.schemas.js');
     const input = createAliasSchema.parse({ localPart: 'Security', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID });
     await expect(createAlias(OWNER_ID, input)).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it('maps the database guard race path to the same stable 403 rejection', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockInsertError({
+      code: '23514',
+      constraint: 'aliases_reserved_local_part_guard',
+      message: 'SHIELDME_RESERVED_ALIAS',
+    });
+
+    await expect(
+      createAlias(OWNER_ID, { localPart: '9router', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID }),
+    ).rejects.toMatchObject({ statusCode: 403, code: 'RESERVED_ALIAS' });
+  });
+
+  it('maps an insert-time uniqueness race to 409', async () => {
+    mockFindFirst.mockResolvedValue(null);
+    mockInsertError({ code: '23505' });
+
+    await expect(
+      createAlias(OWNER_ID, { localPart: 'hello', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID }),
+    ).rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('already exists') });
   });
 
   it('throws 409 when local-part already exists on domain', async () => {
@@ -307,10 +373,10 @@ describe('createAlias', () => {
     expect(result.localPart).toBe('a');
   });
 
-  it('lowercases local-part', async () => {
+  it('normalizes local-part exactly like reserved imports', async () => {
     const { createAliasSchema } = await import('./aliases.schemas.js');
-    const result = createAliasSchema.parse({ localPart: 'HELLO', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID });
-    expect(result.localPart).toBe('hello');
+    const result = createAliasSchema.parse({ localPart: '  CLI.GS  ', domainId: DOMAIN_ID, recipientId: RECIPIENT_ID });
+    expect(result.localPart).toBe('cli.gs');
   });
 });
 
@@ -339,13 +405,28 @@ describe('getAlias', () => {
   });
 });
 
+describe('updateAlias', () => {
+  it('updates only PGP mode and preserves an existing colliding local-part', async () => {
+    mockFindFirst.mockResolvedValue(makeAliasRow({ localPart: 'support' }));
+    mockUpdateChain([makeAliasRow({ localPart: 'support', pgpMode: 'optional' })]);
+
+    const result = await updateAlias(OWNER_ID, ALIAS_ID, { pgpMode: 'optional' });
+
+    expect(result.localPart).toBe('support');
+    expect(result.pgpMode).toBe('optional');
+    expect(mockReservedFindMany).not.toHaveBeenCalled();
+  });
+});
+
 // ── enableAlias ───────────────────────────────────────────────────────────────
 describe('enableAlias', () => {
-  it('enables a disabled alias', async () => {
-    mockFindFirst.mockResolvedValue(makeAliasRow({ status: 'disabled' }));
-    mockUpdateChain([makeAliasRow({ status: 'active' })]);
+  it('enables a disabled existing alias without changing a colliding local-part', async () => {
+    mockFindFirst.mockResolvedValue(makeAliasRow({ localPart: 'support', status: 'disabled' }));
+    mockUpdateChain([makeAliasRow({ localPart: 'support', status: 'active' })]);
     const result = await enableAlias(OWNER_ID, ALIAS_ID);
     expect(result.status).toBe('active');
+    expect(result.localPart).toBe('support');
+    expect(mockReservedFindMany).not.toHaveBeenCalled();
   });
 
   it('throws 409 when alias already active', async () => {
@@ -366,11 +447,13 @@ describe('enableAlias', () => {
 
 // ── disableAlias ──────────────────────────────────────────────────────────────
 describe('disableAlias', () => {
-  it('disables an active alias', async () => {
-    mockFindFirst.mockResolvedValue(makeAliasRow({ status: 'active' }));
-    mockUpdateChain([makeAliasRow({ status: 'disabled' })]);
+  it('disables an active existing alias without changing a colliding local-part', async () => {
+    mockFindFirst.mockResolvedValue(makeAliasRow({ localPart: 'support', status: 'active' }));
+    mockUpdateChain([makeAliasRow({ localPart: 'support', status: 'disabled' })]);
     const result = await disableAlias(OWNER_ID, ALIAS_ID);
     expect(result.status).toBe('disabled');
+    expect(result.localPart).toBe('support');
+    expect(mockReservedFindMany).not.toHaveBeenCalled();
   });
 
   it('throws 409 when alias already disabled', async () => {

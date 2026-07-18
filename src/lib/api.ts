@@ -256,17 +256,21 @@ export interface ReservedLocalPart {
   domain?: string | null;
   action: "reserve" | "allow";
   note?: string | null;
+  sourceBatch?: string | null;
+  sourceSha256?: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
+  status: number;
+  code?: string;
+
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = "ApiError";
+    this.status = status;
+    this.code = code;
   }
 }
 
@@ -286,6 +290,19 @@ async function tryRefresh(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function responseError(res: Response) {
+  let message = res.statusText;
+  let code: string | undefined;
+  try {
+    const body = (await res.json()) as { error?: unknown; code?: unknown };
+    if (typeof body.error === "string") message = body.error;
+    if (typeof body.code === "string") code = body.code;
+  } catch {
+    return new ApiError(res.status, message);
+  }
+  return new ApiError(res.status, message, code);
 }
 
 export async function apiFetch<T>(
@@ -309,7 +326,7 @@ export async function apiFetch<T>(
     if (refreshed) {
       headers.set("Authorization", "Bearer " + tokenStore.getAccess()!);
       const retried = await fetch(API_BASE + path, { ...fetchOpts, headers });
-      if (!retried.ok) throw new ApiError(retried.status, await retried.text());
+      if (!retried.ok) throw await responseError(retried);
       if (retried.status === 204) return undefined as unknown as T;
       return retried.json() as Promise<T>;
     }
@@ -317,15 +334,7 @@ export async function apiFetch<T>(
     throw new ApiError(401, "Unauthorized");
   }
 
-  if (!res.ok) {
-    let msg = res.statusText;
-    try {
-      msg = (await res.json()).error ?? msg;
-    } catch {
-      /* ignore */
-    }
-    throw new ApiError(res.status, msg);
-  }
+  if (!res.ok) throw await responseError(res);
   if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
 }
@@ -484,9 +493,14 @@ export const adminApi = {
       `/api/admin/audit-logs?action=${encodeURIComponent(search)}`,
       { adminSecret },
     ),
-  reservedLocalParts: (search = "", adminSecret?: string) =>
-    apiFetch<{ reservedLocalParts: ReservedLocalPart[] }>(
-      `/api/admin/reserved-local-parts?search=${encodeURIComponent(search)}`,
+  reservedLocalParts: (search = "", page = 1, limit = 50, adminSecret?: string) =>
+    apiFetch<{
+      reservedLocalParts: ReservedLocalPart[];
+      page: number;
+      limit: number;
+      total: number;
+    }>(
+      `/api/admin/reserved-local-parts?search=${encodeURIComponent(search)}&page=${page}&limit=${limit}`,
       { adminSecret },
     ),
   createReservedLocalPart: (

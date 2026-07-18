@@ -21,4 +21,14 @@ describe('reserved local-parts', () => {
     expect(resolveReservedLocalPart('founder', [{ localPart: 'founder', domainId: null, action: 'reserve' }], 'domain-1'))
       .toMatchObject({ reserved: true, source: 'rule' });
   });
+
+  it('always gives an exact domain rule precedence over a global rule', () => {
+    const rules = [
+      { localPart: 'founder', domainId: null, action: 'reserve' as const },
+      { localPart: 'founder', domainId: 'domain-1', action: 'allow' as const },
+    ];
+    expect(resolveReservedLocalPart('Founder', rules, 'domain-1')).toMatchObject({ reserved: false, source: 'rule' });
+    expect(resolveReservedLocalPart('founder', [...rules].reverse(), 'domain-1')).toMatchObject({ reserved: false, source: 'rule' });
+    expect(resolveReservedLocalPart('founder', rules, 'domain-2')).toMatchObject({ reserved: true, source: 'rule' });
+  });
 });

@@ -9,10 +9,60 @@ import type { CreateAliasInput, UpdateAliasInput } from './aliases.schemas.js';
 import { resolveReservedLocalPart } from './reserved-local-parts.js';
 import { assertCanCreateAlias, assertOutboundProviderAllowed, assertPgpAllowed } from '../plans/plans.js';
 
+export const RESERVED_ALIAS_ERROR_CODE = 'RESERVED_ALIAS';
+
 export class AliasError extends Error {
-  constructor(message: string, public statusCode = 400) {
+  constructor(
+    message: string,
+    public statusCode = 400,
+    public code?: string,
+  ) {
     super(message);
   }
+}
+
+const RESERVED_ALIAS_GUARD_CONSTRAINT = 'aliases_reserved_local_part_guard';
+const MAX_DATABASE_ERROR_CAUSE_DEPTH = 8;
+
+type DatabaseError = {
+  code?: unknown;
+  constraint?: unknown;
+  message?: unknown;
+  cause?: unknown;
+};
+
+function findDatabaseErrorInCauseChain(err: unknown, matches: (error: DatabaseError) => boolean) {
+  const seen = new Set<object>();
+  let current = err;
+
+  for (let depth = 0; depth <= MAX_DATABASE_ERROR_CAUSE_DEPTH; depth += 1) {
+    if (typeof current !== 'object' || !current || seen.has(current)) return false;
+    seen.add(current);
+    const error = current as DatabaseError;
+    if (matches(error)) return true;
+    current = error.cause;
+  }
+
+  return false;
+}
+
+export function isReservedAliasDatabaseError(err: unknown) {
+  return findDatabaseErrorInCauseChain(err, (error) =>
+    error.code === '23514' &&
+    (error.constraint === RESERVED_ALIAS_GUARD_CONSTRAINT ||
+      (typeof error.message === 'string' && error.message.includes('SHIELDME_RESERVED_ALIAS'))));
+}
+
+function isAliasUniquenessDatabaseError(err: unknown) {
+  return findDatabaseErrorInCauseChain(err, (error) => error.code === '23505');
+}
+
+function reservedAliasError(localPart: string, domain: string) {
+  return new AliasError(
+    `Alias ${localPart}@${domain} is reserved. Choose or generate a different alias name.`,
+    403,
+    RESERVED_ALIAS_ERROR_CODE,
+  );
 }
 
 export type AliasProtectionStatus = 'protected' | 'unprotected' | 'required_missing_key';
@@ -98,7 +148,7 @@ export async function createAlias(ownerId: string, input: CreateAliasInput) {
     const localPart = input.localPart ?? generateAliasLocalPart(input.serviceLabel!);
     const reservedRules = await db.query.reservedLocalParts.findMany({ where: sql`${reservedLocalParts.localPart} = ${localPart} and (${reservedLocalParts.domainId} is null or ${reservedLocalParts.domainId} = ${input.domainId})`, columns: { localPart: true, domainId: true, action: true } });
     if (resolveReservedLocalPart(localPart, reservedRules, input.domainId).reserved) {
-      if (input.localPart) throw new AliasError(`Alias ${localPart}@${domain.domain} is reserved for domain operations and security`, 403);
+      if (input.localPart) throw reservedAliasError(localPart, domain.domain);
       continue;
     }
     const conflict = await db.query.aliases.findFirst({ where: and(eq(aliases.localPart, localPart), eq(aliases.domainId, input.domainId)) });
@@ -110,7 +160,11 @@ export async function createAlias(ownerId: string, input: CreateAliasInput) {
       const [alias] = await db.insert(aliases).values({ ownerId, domainId: input.domainId, recipientId: input.recipientId, localPart, pgpMode: input.pgpMode ?? 'none' }).returning();
       return { alias, address: `${alias.localPart}@${domain.domain}`, recipientEmail: recipient.email };
     } catch (err) {
-      if (typeof err === 'object' && err && 'code' in err && (err as { code?: string }).code === '23505') {
+      if (isReservedAliasDatabaseError(err)) {
+        if (!input.localPart) continue;
+        throw reservedAliasError(localPart, domain.domain);
+      }
+      if (isAliasUniquenessDatabaseError(err)) {
         if (!input.localPart) continue;
         throw new AliasError(`Alias ${localPart}@${domain.domain} already exists`, 409);
       }
