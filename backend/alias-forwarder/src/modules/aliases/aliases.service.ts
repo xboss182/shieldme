@@ -21,11 +21,40 @@ export class AliasError extends Error {
   }
 }
 
+const RESERVED_ALIAS_GUARD_CONSTRAINT = 'aliases_reserved_local_part_guard';
+const MAX_DATABASE_ERROR_CAUSE_DEPTH = 8;
+
+type DatabaseError = {
+  code?: unknown;
+  constraint?: unknown;
+  message?: unknown;
+  cause?: unknown;
+};
+
+function findDatabaseErrorInCauseChain(err: unknown, matches: (error: DatabaseError) => boolean) {
+  const seen = new Set<object>();
+  let current = err;
+
+  for (let depth = 0; depth <= MAX_DATABASE_ERROR_CAUSE_DEPTH; depth += 1) {
+    if (typeof current !== 'object' || !current || seen.has(current)) return false;
+    seen.add(current);
+    const error = current as DatabaseError;
+    if (matches(error)) return true;
+    current = error.cause;
+  }
+
+  return false;
+}
+
 export function isReservedAliasDatabaseError(err: unknown) {
-  if (typeof err !== 'object' || !err) return false;
-  const error = err as { code?: string; constraint?: string; message?: string };
-  return error.code === '23514' &&
-    (error.constraint === 'aliases_reserved_local_part_guard' || error.message?.includes('SHIELDME_RESERVED_ALIAS'));
+  return findDatabaseErrorInCauseChain(err, (error) =>
+    error.code === '23514' &&
+    (error.constraint === RESERVED_ALIAS_GUARD_CONSTRAINT ||
+      (typeof error.message === 'string' && error.message.includes('SHIELDME_RESERVED_ALIAS'))));
+}
+
+function isAliasUniquenessDatabaseError(err: unknown) {
+  return findDatabaseErrorInCauseChain(err, (error) => error.code === '23505');
 }
 
 function reservedAliasError(localPart: string, domain: string) {
@@ -135,7 +164,7 @@ export async function createAlias(ownerId: string, input: CreateAliasInput) {
         if (!input.localPart) continue;
         throw reservedAliasError(localPart, domain.domain);
       }
-      if (typeof err === 'object' && err && 'code' in err && (err as { code?: string }).code === '23505') {
+      if (isAliasUniquenessDatabaseError(err)) {
         if (!input.localPart) continue;
         throw new AliasError(`Alias ${localPart}@${domain.domain} already exists`, 409);
       }

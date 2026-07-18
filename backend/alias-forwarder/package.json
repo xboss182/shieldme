@@ -15,6 +15,7 @@
     "db:studio": "drizzle-kit studio",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:reserved-postgres": "RUN_POSTGRES_REGRESSION=1 vitest run src/modules/aliases/aliases.postgres.test.ts",
     "reserved:generate": "tsx src/scripts/generate-reserved-local-parts.ts",
     "reserved:check": "tsx src/scripts/generate-reserved-local-parts.ts --check",
     "reserved:apply": "tsx src/scripts/apply-reserved-local-parts.ts",

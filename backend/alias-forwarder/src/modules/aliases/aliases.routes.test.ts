@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
 
 const {
   mockAliasFindFirst,
@@ -66,6 +67,14 @@ function insertRejects(error: unknown) {
   });
 }
 
+function postgresError(message: string, code: string, constraint?: string) {
+  return Object.assign(new Error(message), { code, constraint });
+}
+
+function drizzleQueryError(cause: Error) {
+  return new DrizzleQueryError('insert into "aliases"', [], cause);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockAliasFindFirst.mockResolvedValue(null);
@@ -93,12 +102,12 @@ describe('POST /api/aliases reserved enforcement', () => {
     expect(mockInsert).not.toHaveBeenCalled();
   });
 
-  it('maps a concurrent DB-guard rejection to the same API response', async () => {
-    insertRejects({
-      code: '23514',
-      constraint: 'aliases_reserved_local_part_guard',
-      message: 'SHIELDME_RESERVED_ALIAS',
-    });
+  it('maps a Drizzle-wrapped PostgreSQL guard rejection to the required API response', async () => {
+    insertRejects(drizzleQueryError(postgresError(
+      'new row violates check constraint',
+      '23514',
+      'aliases_reserved_local_part_guard',
+    )));
 
     const response = await request(buildApp()).post('/api/aliases').send({
       localPart: '9router',
@@ -107,12 +116,14 @@ describe('POST /api/aliases reserved enforcement', () => {
     });
 
     expect(response.status).toBe(403);
-    expect(response.body.code).toBe('RESERVED_ALIAS');
-    expect(response.body.error).toContain('different alias name');
+    expect(response.body).toEqual({
+      code: 'RESERVED_ALIAS',
+      error: 'Alias 9router@example.com is reserved. Choose or generate a different alias name.',
+    });
   });
 
-  it('keeps uniqueness conflicts distinct from reserved rejections', async () => {
-    insertRejects({ code: '23505' });
+  it('keeps Drizzle-wrapped uniqueness conflicts distinct from reserved rejections', async () => {
+    insertRejects(drizzleQueryError(postgresError('duplicate key value violates unique constraint', '23505')));
 
     const response = await request(buildApp()).post('/api/aliases').send({
       localPart: 'available',
@@ -122,5 +133,17 @@ describe('POST /api/aliases reserved enforcement', () => {
 
     expect(response.status).toBe(409);
     expect(response.body).toEqual({ error: 'Alias available@example.com already exists' });
+  });
+
+  it('preserves unrelated Drizzle errors as server failures', async () => {
+    insertRejects(drizzleQueryError(postgresError('connection lost', '08006')));
+
+    const response = await request(buildApp()).post('/api/aliases').send({
+      localPart: 'available',
+      domainId: DOMAIN_ID,
+      recipientId: RECIPIENT_ID,
+    });
+
+    expect(response.status).toBe(500);
   });
 });

@@ -80,6 +80,7 @@ import {
   deleteAlias,
   updateAlias,
   AliasError,
+  isReservedAliasDatabaseError,
   getAliasProtection,
   getAliasStats,
   generateAliasLocalPart,
@@ -199,6 +200,38 @@ describe('generated alias names', () => {
 
   it('rejects labels without letters or numbers', () => {
     expect(() => normalizeServiceLabel('---')).toThrow('Service label must contain letters or numbers');
+  });
+});
+
+describe('isReservedAliasDatabaseError', () => {
+  it('recognizes a guard error through a bounded cause chain', () => {
+    const postgresError = Object.assign(new Error('SHIELDME_RESERVED_ALIAS'), {
+      code: '23514',
+      constraint: 'aliases_reserved_local_part_guard',
+    });
+    const wrapped = Array.from({ length: 8 }).reduce<Error>((cause) => {
+      const error = new Error('Drizzle query failed');
+      error.cause = cause;
+      return error;
+    }, postgresError);
+
+    expect(isReservedAliasDatabaseError(wrapped)).toBe(true);
+  });
+
+  it('stops safely on cyclic and over-depth cause chains', () => {
+    const cyclic = new Error('cyclic');
+    cyclic.cause = cyclic;
+    const chain = Array.from({ length: 9 }).reduce<Error>((cause) => {
+      const error = new Error('wrapped');
+      error.cause = cause;
+      return error;
+    }, Object.assign(new Error('SHIELDME_RESERVED_ALIAS'), {
+      code: '23514',
+      constraint: 'aliases_reserved_local_part_guard',
+    }));
+
+    expect(isReservedAliasDatabaseError(cyclic)).toBe(false);
+    expect(isReservedAliasDatabaseError(chain)).toBe(false);
   });
 });
 
