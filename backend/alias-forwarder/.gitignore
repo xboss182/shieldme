@@ -12,6 +12,7 @@ logs/
 *.sqlite3
 *.db
 *.sql
+!drizzle/operational/*.sql
 *.dump
 *.bak
 backups/
