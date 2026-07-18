@@ -16,22 +16,58 @@ async function docker(...args: string[]) {
   return exec('docker', args);
 }
 
-async function waitForPostgres(containerName: string) {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      await docker('exec', containerName, 'pg_isready', '-U', 'shieldme', '-d', 'reserved_regression');
-      return;
-    } catch {
-      await sleep(250);
-    }
-  }
-  throw new Error('Timed out waiting for PostgreSQL regression container');
+const POSTGRES_READINESS_ATTEMPTS = 40;
+const POSTGRES_READINESS_DELAY_MS = 250;
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function containerPort(output: string) {
-  const address = output.split('\n').find((line) => line.startsWith('127.0.0.1:'));
-  const port = address?.split(':').at(-1);
-  if (!port) throw new Error(`Could not resolve PostgreSQL regression port: ${output}`);
+function truncateDiagnostic(value: string, maxLength = 2_000) {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
+}
+
+async function postgresDiagnostics(containerName: string) {
+  const [state, logs] = await Promise.all([
+    docker('inspect', '--format', '{{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}}', containerName)
+      .then(({ stdout }) => stdout.trim())
+      .catch((error) => `inspect failed: ${errorMessage(error)}`),
+    docker('logs', '--tail', '20', containerName)
+      .then(({ stdout, stderr }) => `${stdout}${stderr}`.trim())
+      .catch((error) => `logs failed: ${errorMessage(error)}`),
+  ]);
+  return `state=${truncateDiagnostic(state)} logs=${truncateDiagnostic(logs)}`;
+}
+
+async function waitForPublishedPostgres(databaseUrl: string, containerName: string) {
+  let lastError = 'no connection attempt made';
+  for (let attempt = 1; attempt <= POSTGRES_READINESS_ATTEMPTS; attempt += 1) {
+    const probe = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 1_000 });
+    try {
+      await probe.query('SELECT 1');
+      return;
+    } catch (error) {
+      lastError = errorMessage(error);
+    } finally {
+      await probe.end().catch(() => undefined);
+    }
+    await sleep(POSTGRES_READINESS_DELAY_MS);
+  }
+
+  throw new Error(
+    `Timed out probing published PostgreSQL endpoint ${databaseUrl.replace(/:[^:@/]+@/, ':***@')} after ${POSTGRES_READINESS_ATTEMPTS} attempts; last error: ${lastError}; ${await postgresDiagnostics(containerName)}`,
+  );
+}
+
+async function publishedPort(containerName: string) {
+  const { stdout } = await docker(
+    'inspect',
+    '--format',
+    '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}',
+    containerName,
+  );
+  const port = stdout.trim();
+  if (!/^\d+$/.test(port)) throw new Error(`Could not resolve PostgreSQL regression host port: ${port}`);
   return port;
 }
 
@@ -63,9 +99,9 @@ describe.runIf(runPostgresRegression)('reserved alias PostgreSQL regression', ()
         '127.0.0.1::5432',
         'postgres:16-alpine',
       );
-      await waitForPostgres(containerName);
-      const port = containerPort((await docker('port', containerName, '5432/tcp')).stdout);
+      const port = await publishedPort(containerName);
       const databaseUrl = `postgres://shieldme:shieldme-test@127.0.0.1:${port}/reserved_regression`;
+      await waitForPublishedPostgres(databaseUrl, containerName);
       regressionPool = new Pool({ connectionString: databaseUrl });
 
       await regressionPool.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
