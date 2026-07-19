@@ -1,8 +1,8 @@
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
-import { and, eq, gte, lte, ne } from 'drizzle-orm';
+import { and, count, desc, eq, gte, lte, min, ne } from 'drizzle-orm';
 import { db } from '../../db/client.js';
-import { aliases, domainSigningKeys, domains, recipients, smtpRelayCredentials, smtpRelayProfiles, smtpRelayTests } from '../../db/schema.js';
+import { aliases, auditLogs, domainSigningKeys, domains, mailLogs, recipients, smtpRelayCredentials, smtpRelayProfiles, smtpRelayTests } from '../../db/schema.js';
 import { getPlatformDomain, isByoSmtpEnabledForOwner } from '../../config/runtime-config.js';
 import { generateToken, hashToken, verifyToken } from '../../lib/tokens.js';
 import { writeAuditLog } from '../admin/admin.service.js';
@@ -29,7 +29,11 @@ function requireByoSmtp(ownerId: string) {
   if (!isByoSmtpEnabledForOwner(ownerId)) throw new SmtpRelayError('BYO SMTP is unavailable', 403, 'byo_smtp_disabled');
 }
 
-function redactedRelay(row: RelayRow) {
+async function redactedRelay(row: RelayRow) {
+  const [queue] = await db
+    .select({ queued: count(), retryDeadline: min(mailLogs.nextAttemptAt) })
+    .from(mailLogs)
+    .where(and(eq(mailLogs.smtpRelayId, row.id), eq(mailLogs.status, 'queued'), eq(mailLogs.outboundRouteMode, 'custom_smtp')));
   return {
     id: row.id,
     domainId: row.domainId,
@@ -47,6 +51,7 @@ function redactedRelay(row: RelayRow) {
     lastOutcomeCode: row.lastOutcomeCode,
     lastTestedAt: row.lastTestedAt,
     activeCredentialVersion: row.activeCredentialVersion,
+    queue: { queued: Number(queue?.queued ?? 0), retryDeadline: queue?.retryDeadline ?? null },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -170,7 +175,7 @@ export async function createSmtpRelay(ownerId: string, input: CreateSmtpRelayInp
     await db.insert(smtpRelayCredentials).values({ relayId: id, version: 1, ...credentials });
     await createSigningKey(ownerId, domain.id);
     await writeAuditLog('smtp_relay.created', 'smtp_relay', id, { domainId: domain.id, host: relay.host, port: relay.port }, { type: 'user', id: ownerId });
-    return redactedRelay(relay);
+    return await redactedRelay(relay);
   } catch (error) {
     if ((error as { code?: string }).code === '23505') throw new SmtpRelayError('A relay already exists for this domain', 409, 'relay_exists');
     throw error;
@@ -180,12 +185,23 @@ export async function createSmtpRelay(ownerId: string, input: CreateSmtpRelayInp
 export async function listSmtpRelays(ownerId: string) {
   requireByoSmtp(ownerId);
   const relays = await db.query.smtpRelayProfiles.findMany({ where: eq(smtpRelayProfiles.ownerId, ownerId) });
-  return relays.map(redactedRelay);
+  return Promise.all(relays.map(redactedRelay));
 }
 
 export async function getSmtpRelay(ownerId: string, relayId: string) {
   requireByoSmtp(ownerId);
   return redactedRelay(await getOwnedRelay(ownerId, relayId));
+}
+
+export async function listSmtpRelayAuditEvents(ownerId: string, relayId: string) {
+  requireByoSmtp(ownerId);
+  await getOwnedRelay(ownerId, relayId);
+  return db
+    .select({ id: auditLogs.id, timestamp: auditLogs.timestamp, action: auditLogs.action, metadata: auditLogs.metadata })
+    .from(auditLogs)
+    .where(and(eq(auditLogs.targetType, 'smtp_relay'), eq(auditLogs.targetId, relayId)))
+    .orderBy(desc(auditLogs.timestamp))
+    .limit(20);
 }
 
 export async function updateSmtpRelay(ownerId: string, relayId: string, label: string) {

@@ -239,6 +239,8 @@ export async function listAliases(ownerId: string) {
       domainId: true,
       recipientId: true,
       status: true,
+      outboundMode: true,
+      smtpRelayId: true,
       pgpMode: true,
       createdAt: true,
       updatedAt: true,
