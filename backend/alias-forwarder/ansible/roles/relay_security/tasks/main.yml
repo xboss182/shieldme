@@ -1,0 +1,161 @@
+---
+- name: Validate relay security configuration before opt-in
+  ansible.builtin.assert:
+    that:
+      - shieldme_relay_security_apply | bool
+      - shieldme_relay_kms_active_key_id is match('^v[1-9][0-9]*$')
+      - shieldme_relay_approved_hosts | length > 0
+      - shieldme_relay_pilot_owner_ids | length > 0
+      - shieldme_relay_metrics_port | int > 0
+    fail_msg: Relay security is disabled by default. Explicitly provide an active KEK, approved public SMTP hostnames, disposable pilot owner IDs, and a metrics port.
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay egress dependencies
+  ansible.builtin.apt:
+    name: [nftables]
+    state: present
+    update_cache: true
+  when: shieldme_relay_security_apply | bool
+
+- name: Ensure relay control directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /etc/shieldme, owner: root, group: shieldme, mode: '0750' }
+    - { path: /var/lib/shieldme-relay-kms, owner: root, group: root, mode: '0700' }
+    - { path: "{{ shieldme_prometheus_rules_path }}", owner: root, group: root, mode: '0755' }
+  when: shieldme_relay_security_apply | bool
+
+- name: Install non-secret relay KMS configuration
+  ansible.builtin.copy:
+    dest: /etc/shieldme/relay-kms.env
+    content: |
+      RELAY_KMS_ACTIVE_KEY_ID={{ shieldme_relay_kms_active_key_id }}
+      RELAY_KMS_SOCKET_PATH=/run/shieldme-relay-kms/kms.sock
+      RELAY_KMS_KEY_DIR=/var/lib/shieldme-relay-kms
+    owner: root
+    group: shieldme
+    mode: '0640'
+  notify: restart shieldme relay kms
+  when: shieldme_relay_security_apply | bool
+
+- name: Require operator-provisioned active relay KEK
+  ansible.builtin.stat:
+    path: /var/lib/shieldme-relay-kms/{{ shieldme_relay_kms_active_key_id }}.key
+  register: shieldme_relay_active_kek
+  when: shieldme_relay_security_apply | bool
+
+- name: Fail without an operator-provisioned active relay KEK
+  ansible.builtin.assert:
+    that:
+      - shieldme_relay_active_kek.stat.exists
+      - shieldme_relay_active_kek.stat.pw_name == 'root'
+      - shieldme_relay_active_kek.stat.gr_name == 'root'
+      - shieldme_relay_active_kek.stat.mode == '0600'
+    fail_msg: Create the root-owned 0600 KEK outside PostgreSQL before enabling the pilot.
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay KMS service program
+  ansible.builtin.copy:
+    src: relay-kms.mjs
+    dest: /usr/local/libexec/shieldme-relay-kms.mjs
+    owner: root
+    group: root
+    mode: '0700'
+  notify: restart shieldme relay kms
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay KMS service
+  ansible.builtin.template:
+    src: shieldme-relay-kms.service.j2
+    dest: /etc/systemd/system/shieldme-relay-kms.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart shieldme relay kms
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay egress synchronizer
+  ansible.builtin.copy:
+    src: sync-relay-egress.py
+    dest: /usr/local/libexec/shieldme-sync-relay-egress.py
+    owner: root
+    group: root
+    mode: '0755'
+  when: shieldme_relay_security_apply | bool
+
+- name: Install approved relay host list
+  ansible.builtin.copy:
+    dest: /etc/shieldme/relay-approved-hosts
+    content: "{{ shieldme_relay_approved_hosts | join('\\n') }}\\n"
+    owner: root
+    group: shieldme
+    mode: '0640'
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay egress service
+  ansible.builtin.template:
+    src: shieldme-relay-egress.service.j2
+    dest: /etc/systemd/system/shieldme-relay-egress.service
+    owner: root
+    group: root
+    mode: '0644'
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay egress refresh timer
+  ansible.builtin.template:
+    src: shieldme-relay-egress.timer.j2
+    dest: /etc/systemd/system/shieldme-relay-egress.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when: shieldme_relay_security_apply | bool
+
+- name: Start guarded relay KMS and egress controls
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: [shieldme-relay-kms.service, shieldme-relay-egress.service, shieldme-relay-egress.timer]
+  when: shieldme_relay_security_apply | bool
+
+- name: Verify relay egress policy contains only approved SMTP destinations
+  ansible.builtin.command: nft list table inet shieldme_relay_egress
+  changed_when: false
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay alert rules for Prometheus review
+  ansible.builtin.template:
+    src: shieldme-relay-alerts.yml.j2
+    dest: "{{ shieldme_prometheus_rules_path }}/shieldme-relay.yml"
+    owner: root
+    group: root
+    mode: '0644'
+  when: shieldme_relay_security_apply | bool
+
+- name: Install relay Grafana dashboard for review
+  ansible.builtin.template:
+    src: shieldme-relay-dashboard.json.j2
+    dest: /etc/grafana/provisioning/dashboards/shieldme-relay-dashboard.json
+    owner: root
+    group: root
+    mode: '0644'
+  when: shieldme_relay_security_apply | bool
+
+- name: Check whether promtool is available
+  ansible.builtin.stat:
+    path: /usr/bin/promtool
+  register: shieldme_promtool
+  when: shieldme_relay_security_apply | bool
+
+- name: Validate relay alert rules when promtool is present
+  ansible.builtin.command: promtool check rules {{ shieldme_prometheus_rules_path }}/shieldme-relay.yml
+  changed_when: false
+  when:
+    - shieldme_relay_security_apply | bool
+    - shieldme_promtool.stat.exists

@@ -5,6 +5,9 @@ import type { SMTPServerDataStream, SMTPServerSession } from 'smtp-server';
 import { handleInbound } from '../modules/inbound/inbound.service.js';
 import { processSmtpBounce } from '../modules/bounces/bounces.service.js';
 import { logger } from '../lib/logger.js';
+import { configureRelayKmsFromEnv } from '../modules/smtp-relays/local-kms.js';
+
+configureRelayKmsFromEnv();
 
 // smtp-server ships CJS; handle ESM interop
 const Server: typeof SMTPServer.SMTPServer =

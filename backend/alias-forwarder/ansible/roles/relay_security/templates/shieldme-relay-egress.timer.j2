@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh ShieldMe approved SMTP relay egress addresses
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

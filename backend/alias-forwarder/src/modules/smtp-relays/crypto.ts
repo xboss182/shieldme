@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { relayFailuresTotal } from './metrics.js';
 
 export type KmsClient = {
   encrypt(input: { plaintext: string; aad: string }): Promise<{ wrappedDek: string; keyId: string }>;
@@ -57,8 +58,28 @@ export async function encryptRelaySecret(kind: string, ownerId: string, recordId
       kekKeyId: wrapped.keyId,
       envelopeVersion: 1,
     };
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'secret_encrypt' });
+    throw error;
   } finally {
     dek.fill(0);
+  }
+}
+
+export async function rewrapRelaySecret(kind: string, ownerId: string, recordId: string, version: number, envelope: SecretEnvelope): Promise<SecretEnvelope> {
+  const context = aad(kind, ownerId, recordId, version);
+  let dek: Buffer | undefined;
+  try {
+    dek = Buffer.from(await requiredClient().decrypt({ wrappedDek: envelope.wrappedDek, aad: context }), 'base64');
+    if (dek.length !== 32) throw new RelayCryptoError('invalid_kms_dek');
+    const wrapped = await requiredClient().encrypt({ plaintext: dek.toString('base64'), aad: context });
+    return { ...envelope, wrappedDek: wrapped.wrappedDek, kekKeyId: wrapped.keyId };
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'secret_decrypt' });
+    if (error instanceof RelayCryptoError) throw error;
+    throw new RelayCryptoError('secret_rewrap_failed', 503);
+  } finally {
+    dek?.fill(0);
   }
 }
 
@@ -76,6 +97,7 @@ export async function decryptRelaySecret<T>(kind: string, ownerId: string, recor
       decipher.final(),
     ]).toString('utf8')) as T;
   } catch (error) {
+    relayFailuresTotal.inc({ phase: 'secret_decrypt' });
     if (error instanceof RelayCryptoError) throw error;
     throw new RelayCryptoError('secret_decrypt_failed', 503);
   } finally {

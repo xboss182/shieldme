@@ -3,6 +3,7 @@ import tls from 'node:tls';
 import nodemailer from 'nodemailer';
 import type { ForwardPayload } from '../inbound/resend.service.js';
 import { resolvePublicRelayHost } from './ssrf.js';
+import { relayFailuresTotal } from './metrics.js';
 
 export type RelayTransportConfig = {
   host: string;
@@ -43,7 +44,13 @@ async function withTotalTimeout<T>(operation: Promise<T>, timeoutMs = 60_000): P
 }
 
 async function createPinnedTransport(config: RelayTransportConfig) {
-  const { addresses } = await resolvePublicRelayHost(config.host);
+  let addresses: string[];
+  try {
+    ({ addresses } = await resolvePublicRelayHost(config.host));
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'ssrf' });
+    throw error;
+  }
   const address = addresses[0]!;
   return nodemailer.createTransport({
     host: config.host,
@@ -63,21 +70,33 @@ async function createPinnedTransport(config: RelayTransportConfig) {
 }
 
 export async function verifySmtpRelay(config: RelayTransportConfig) {
-  const transport = await createPinnedTransport(config);
-  await withTotalTimeout(transport.verify());
+  try {
+    const transport = await createPinnedTransport(config);
+    await withTotalTimeout(transport.verify());
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    relayFailuresTotal.inc({ phase: /auth|login|credential/.test(message) ? 'auth' : /tls|certificate|starttls/.test(message) ? 'tls' : 'connection' });
+    throw error;
+  }
 }
 
 export async function sendSmtpRelayMessage(config: RelayTransportConfig, payload: ForwardPayload & { envelopeFrom: string }) {
-  const transport = await createPinnedTransport(config);
-  const result = await withTotalTimeout<{ messageId?: string }>(transport.sendMail({
-    from: payload.from,
-    to: payload.to,
-    subject: payload.subject,
-    replyTo: payload.replyTo,
-    text: payload.textBody,
-    html: payload.htmlBody,
-    headers: payload.headers,
-    envelope: { from: payload.envelopeFrom, to: [payload.to] },
-  }));
-  return String(result.messageId ?? 'smtp_submitted');
+  try {
+    const transport = await createPinnedTransport(config);
+    const result = await withTotalTimeout<{ messageId?: string }>(transport.sendMail({
+      from: payload.from,
+      to: payload.to,
+      subject: payload.subject,
+      replyTo: payload.replyTo,
+      text: payload.textBody,
+      html: payload.htmlBody,
+      headers: payload.headers,
+      envelope: { from: payload.envelopeFrom, to: [payload.to] },
+    }));
+    return String(result.messageId ?? 'smtp_submitted');
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : '';
+    relayFailuresTotal.inc({ phase: /auth|login|credential/.test(message) ? 'auth' : /tls|certificate|starttls/.test(message) ? 'tls' : 'submit' });
+    throw error;
+  }
 }

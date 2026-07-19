@@ -1,0 +1,50 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "panels": [
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "targets": [
+        { "expr": "increase(shieldme_smtp_relay_submissions_total[$__rate_interval])", "legendFormat": "submits", "refId": "A" },
+        { "expr": "increase(shieldme_smtp_relay_retries_total[$__rate_interval])", "legendFormat": "retries", "refId": "B" },
+        { "expr": "increase(shieldme_smtp_relay_circuit_openings_total[$__rate_interval])", "legendFormat": "circuit opens", "refId": "C" }
+      ],
+      "title": "Relay activity",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "targets": [
+        { "expr": "shieldme_smtp_relay_queue_oldest_age_seconds", "legendFormat": "oldest queued", "refId": "A" },
+        { "expr": "shieldme_smtp_relay_queue_depth", "legendFormat": "queue depth", "refId": "B" }
+      ],
+      "title": "Relay queue",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "${DS_PROMETHEUS}",
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "targets": [
+        { "expr": "sum by (phase) (increase(shieldme_smtp_relay_failures_total[$__rate_interval]))", "legendFormat": "{{phase}}", "refId": "A" },
+        { "expr": "sum by (event) (increase(shieldme_delivery_events_total{event=~\"failed|bounced|complained\"}[$__rate_interval]))", "legendFormat": "{{event}}", "refId": "B" }
+      ],
+      "title": "Relay and delivery failures",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 41,
+  "tags": ["shieldme", "smtp", "relay"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "title": "ShieldMe SMTP Relay Pilot",
+  "uid": "shieldme-smtp-relay-pilot",
+  "version": 1
+}
