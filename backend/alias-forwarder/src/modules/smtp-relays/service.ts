@@ -364,10 +364,11 @@ export async function confirmSmtpRelayTest(ownerId: string, relayId: string, tes
     db.query.smtpRelayProfiles.findFirst({ where: and(eq(smtpRelayProfiles.id, relayId), eq(smtpRelayProfiles.ownerId, ownerId)) }),
     db.query.smtpRelayCredentials.findFirst({ where: and(eq(smtpRelayCredentials.relayId, relayId), eq(smtpRelayCredentials.version, test.credentialVersion)) }),
   ]);
-  if (!isRelayTestConfirmable(currentRelay, test, credential, now)) {
+  if (!currentRelay || !isRelayTestConfirmable(currentRelay, test, credential, now)) {
     await db.update(smtpRelayTests).set({ phase: 'failed', outcomeCode: 'relay_state_changed' }).where(and(eq(smtpRelayTests.id, test.id), isNull(smtpRelayTests.confirmedAt)));
     throw new SmtpRelayError('Relay state or credentials changed; submit a new test', 409, 'relay_state_changed');
   }
+  const previousVersion = currentRelay.activeCredentialVersion;
   const [relay] = await db.update(smtpRelayProfiles)
     .set({
       status: sql`case when ${smtpRelayProfiles.activeCredentialVersion} is null then 'ready'::smtp_relay_status else 'active'::smtp_relay_status end`,
@@ -395,15 +396,15 @@ export async function confirmSmtpRelayTest(ownerId: string, relayId: string, tes
         or(isNull(smtpRelayCredentials.revokedAt), gt(smtpRelayCredentials.revokedAt, now)),
       ))),
     ))
-    .returning({ previousVersion: smtpRelayProfiles.activeCredentialVersion });
+    .returning({ id: smtpRelayProfiles.id });
   if (!relay) {
     await db.update(smtpRelayTests).set({ phase: 'failed', outcomeCode: 'relay_state_changed' }).where(and(eq(smtpRelayTests.id, test.id), isNull(smtpRelayTests.confirmedAt)));
     throw new SmtpRelayError('Relay state or credentials changed; submit a new test', 409, 'relay_state_changed');
   }
   relayTestsTotal.inc({ phase: 'recipient_confirmation', outcome: 'success' });
   await db.update(smtpRelayTests).set({ phase: 'confirmed', outcomeCode: 'recipient_confirmed', confirmedAt: now }).where(and(eq(smtpRelayTests.id, test.id), eq(smtpRelayTests.phase, 'submitted'), isNull(smtpRelayTests.confirmedAt)));
-  if (relay.previousVersion && relay.previousVersion !== test.credentialVersion) {
-    await db.update(smtpRelayCredentials).set({ revokedAt: new Date(now.getTime() + 30 * 60 * 1000) }).where(and(eq(smtpRelayCredentials.relayId, relayId), eq(smtpRelayCredentials.version, relay.previousVersion)));
+  if (previousVersion && previousVersion !== test.credentialVersion) {
+    await db.update(smtpRelayCredentials).set({ revokedAt: new Date(now.getTime() + 30 * 60 * 1000) }).where(and(eq(smtpRelayCredentials.relayId, relayId), eq(smtpRelayCredentials.version, previousVersion)));
   }
   await writeAuditLog('smtp_relay.test_confirmed', 'smtp_relay', relayId, { testId }, { type: 'user', id: ownerId });
   return getSmtpRelay(ownerId, relayId);
