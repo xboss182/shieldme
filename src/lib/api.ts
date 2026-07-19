@@ -85,6 +85,8 @@ export interface Alias {
   recipientId: string;
   recipient?: { email: string };
   status: "active" | "disabled";
+  outboundMode?: "platform" | "custom_smtp";
+  smtpRelayId?: string | null;
   pgpMode?: "none" | "optional" | "required";
   protectionStatus?: AliasProtectionStatus;
   protection?: AliasProtection;
@@ -128,27 +130,66 @@ export interface PlanSummary {
   usage: { domains: number; recipients: number; aliases: number; monthlyForwards: number };
 }
 
+export type SmtpRelayStatus =
+  | "draft"
+  | "credentials_unverified"
+  | "testing_dns"
+  | "testing_tls"
+  | "testing_auth"
+  | "test_submitted"
+  | "awaiting_recipient_confirmation"
+  | "ready"
+  | "active"
+  | "degraded"
+  | "circuit_open"
+  | "disabled"
+  | "revoked";
+export type SmtpCircuitStatus = "closed" | "open" | "half_open";
+
 export interface SmtpRelay {
   id: string;
-  enabled: boolean;
-  name: string;
-  domain: string;
+  domainId: string;
+  label: string;
   host: string;
-  port: number;
-  provider: string;
-  tls: "required" | "opportunistic";
-  pgp: "required" | "optional";
-  credentialConfigured?: boolean;
-  lastTestedAt?: string;
-  lastTestStatus?: "passed" | "failed";
+  port: 465 | 587;
+  tlsMode: "implicit_tls" | "starttls";
+  authMethod: "plain" | "login";
+  identityLocalPart: string;
+  bounceSpfInclude: string;
+  credentialConfigured: boolean;
+  status: SmtpRelayStatus;
+  circuitStatus: SmtpCircuitStatus;
+  circuitUntil: string | null;
+  lastOutcomeCode: string | null;
+  lastTestedAt: string | null;
+  activeCredentialVersion: number | null;
+  queue: { queued: number; retryDeadline: string | null };
   createdAt: string;
   updatedAt: string;
-  stats: { sent: number; delivered: number; bounced: number; blocked: number };
 }
-export type SmtpRelayInput = Pick<
-  SmtpRelay,
-  "name" | "domain" | "host" | "port" | "provider" | "tls" | "pgp" | "enabled"
-> & { credentials?: { username: string; password: string } };
+export interface SmtpRelayInput {
+  label: string;
+  domainId: string;
+  host: string;
+  port: 465 | 587;
+  tlsMode: "implicit_tls" | "starttls";
+  authMethod: "plain" | "login";
+  username: string;
+  password: string;
+  identityLocalPart: string;
+  bounceSpfInclude: string;
+}
+export interface SmtpRelayTest {
+  id: string;
+  status: "awaiting_recipient_confirmation";
+  expiresAt: string;
+}
+export interface SmtpRelayAuditEvent {
+  id: string;
+  timestamp: string;
+  action: string;
+  metadata: Record<string, unknown>;
+}
 
 export interface AdminConfig {
   platformDomain?: string;
@@ -429,11 +470,46 @@ export const smtpRelaysApi = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
-  test: (id: string) =>
-    apiFetch<{ relay: SmtpRelay; ok: boolean }>("/api/smtp-relays/" + id + "/test", {
+  test: (id: string, recipientId: string) =>
+    apiFetch<{ test: SmtpRelayTest }>("/api/smtp-relays/" + id + "/test", {
       method: "POST",
+      body: JSON.stringify({ recipientId }),
     }),
+  confirmTest: (relayId: string, testId: string, token: string) =>
+    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${relayId}/tests/${testId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  rotateCredentials: (
+    relayId: string,
+    input: { username: string; password: string; recipientId: string },
+  ) =>
+    apiFetch<{ test: SmtpRelayTest }>(`/api/smtp-relays/${relayId}/rotate-credentials`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  enable: (id: string) =>
+    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${id}/enable`, { method: "POST" }),
+  disable: (id: string) =>
+    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${id}/disable`, { method: "POST" }),
+  revoke: (id: string) =>
+    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${id}/revoke`, { method: "POST" }),
+  auditEvents: (id: string) =>
+    apiFetch<{ events: SmtpRelayAuditEvent[] }>(`/api/smtp-relays/${id}/audit-events`),
   remove: (id: string) => apiFetch<void>("/api/smtp-relays/" + id, { method: "DELETE" }),
+};
+
+export const aliasesOutboundApi = {
+  setRoute: (
+    aliasId: string,
+    route:
+      | { mode: "platform" }
+      | { mode: "custom_smtp"; relayId: string; acknowledgeNoFallback: true },
+  ) =>
+    apiFetch<{ alias: Alias }>(`/api/aliases/${aliasId}/outbound-route`, {
+      method: "PUT",
+      body: JSON.stringify(route),
+    }),
 };
 
 export const adminApi = {
