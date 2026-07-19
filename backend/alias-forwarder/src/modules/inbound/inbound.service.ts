@@ -4,6 +4,7 @@ import { aliases, domains, mailLogs, users } from '../../db/schema.js';
 import { buildEncryptedEmailForwardingJob, emailForwardingQueue } from '../../queues/email-jobs.js';
 import { logger } from '../../lib/logger.js';
 import { getPlatformDomain } from '../../config/runtime-config.js';
+import { assertCustomRelayCanAccept, SmtpRelayError } from '../smtp-relays/service.js';
 import {
   AbuseError,
   checkRateLimits,
@@ -51,6 +52,8 @@ export interface MailAuthResults extends Record<string, unknown> {
 
 interface MailLogInsert {
   aliasId?: string | null;
+  outboundRouteMode?: 'platform' | 'custom_smtp';
+  smtpRelayId?: string | null;
   envelopeFrom: string;
   envelopeTo: string;
   forwardedTo?: string | null;
@@ -106,6 +109,8 @@ async function insertMailLog(data: MailLogInsert) {
     .insert(mailLogs)
     .values({
       aliasId: data.aliasId ?? null,
+      outboundRouteMode: data.outboundRouteMode ?? 'platform',
+      smtpRelayId: data.smtpRelayId ?? null,
       envelopeFrom: data.envelopeFrom,
       envelopeTo: data.envelopeTo,
       forwardedTo: data.forwardedTo ?? null,
@@ -165,6 +170,11 @@ export async function handleInbound(
     authResults: auth.results,
     authFailureCount: auth.failureCount,
   };
+
+  if ((envelope.sizeBytes ?? 0) > 10 * 1024 * 1024) {
+    await insertMailLog({ ...baseLog, status: 'rejected', rejectionReason: 'message_too_large' });
+    throw new InboundError('Message exceeds the 10 MB limit', 552);
+  }
 
   // ── Global forwarding kill-switch ────────────────────────────────────────
   if (!isForwardingEnabled()) {
@@ -274,10 +284,30 @@ export async function handleInbound(
     throw new InboundError(spamScan.action === 'quarantine' ? 'Message quarantined by spam policy' : 'Message rejected by spam policy');
   }
 
+  const routeMode = alias.outboundMode ?? 'platform';
+  const relayId = alias.smtpRelayId ?? undefined;
+  let credentialVersion: number | undefined;
+  let halfOpenProbe = false;
+  if (routeMode === 'custom_smtp') {
+    if (!relayId) throw new InboundError('Custom SMTP relay route is invalid', 451);
+    try {
+      const relay = await assertCustomRelayCanAccept(alias.ownerId, relayId);
+      credentialVersion = relay.activeCredentialVersion ?? undefined;
+      halfOpenProbe = relay.circuitStatus === 'half_open';
+      if (!credentialVersion) throw new SmtpRelayError('Relay has no active credential version', 451, 'credential_version_unavailable');
+    } catch (error) {
+      const code = error instanceof SmtpRelayError ? error.code : 'relay_unavailable';
+      await insertMailLog({ ...baseLog, ...spamLogFields, aliasId: alias.id, outboundRouteMode: 'custom_smtp', smtpRelayId: relayId, status: 'rejected', rejectionReason: code });
+      throw new InboundError('Custom SMTP relay is unavailable', 451);
+    }
+  }
+
   const [log] = await insertMailLog({
     ...baseLog,
     ...spamLogFields,
     aliasId: alias.id,
+    outboundRouteMode: routeMode,
+    smtpRelayId: relayId ?? null,
     forwardedTo: recipient.email,
     status: 'queued',
   });
@@ -285,6 +315,10 @@ export async function handleInbound(
   const jobPayload = buildEncryptedEmailForwardingJob({
     aliasId: alias.id,
     messageId: log.id,
+    routeMode,
+    relayId,
+    credentialVersion,
+    halfOpenProbe,
     subject: envelope.subject,
     textBody: envelope.textBody,
     htmlBody: envelope.htmlBody,

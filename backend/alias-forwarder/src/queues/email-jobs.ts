@@ -8,6 +8,10 @@ export const emailForwardingQueueName = 'email-forwarding';
 export type EmailForwardingPayload = {
   aliasId: string;
   messageId: string;
+  routeMode?: 'platform' | 'custom_smtp';
+  relayId?: string;
+  credentialVersion?: number;
+  halfOpenProbe?: boolean;
   /** Original email subject */
   subject?: string;
   /** Original email plain-text body */

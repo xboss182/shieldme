@@ -52,6 +52,8 @@ const envSchema = z.object({
   // Encrypt them before BullMQ writes to Redis and expire them aggressively.
   QUEUE_ENCRYPTION_SECRET: z.string().min(32).optional(),
   EMAIL_QUEUE_PAYLOAD_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+  BYO_SMTP_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
+  BYO_SMTP_PILOT_OWNER_IDS: z.string().default('').transform((value) => value.split(',').map((id) => id.trim()).filter(Boolean)).refine((ids) => ids.every((id) => z.string().uuid().safeParse(id).success), 'BYO_SMTP_PILOT_OWNER_IDS must contain UUIDs'),
 });
 
 const parsed = envSchema.safeParse(process.env);

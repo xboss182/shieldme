@@ -107,6 +107,7 @@ describe.runIf(runPostgresRegression)('reserved alias PostgreSQL regression', ()
       await regressionPool.query('CREATE EXTENSION IF NOT EXISTS pgcrypto');
       await regressionPool.query((await readSql('../../../drizzle/canonical-baseline/20260715175548_canonical_baseline.sql')).replaceAll('--> statement-breakpoint', ''));
       await regressionPool.query(await readSql('../../../drizzle/operational/20260718_dom_reserved_local_parts.sql'));
+      await regressionPool.query(await readSql('../../../drizzle/0005_cold_amazoness.sql'));
 
       const userId = randomUUID();
       const domainId = randomUUID();

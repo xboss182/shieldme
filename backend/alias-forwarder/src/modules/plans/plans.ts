@@ -78,8 +78,11 @@ export async function assertPgpAllowed(userId: string) {
 export async function assertOutboundProviderAllowed(userId: string) {
   const provider = getOutboundProvider();
   if (provider === 'resend') return;
+  await assertByoSmtpAllowed(userId);
+}
+export async function assertByoSmtpAllowed(userId: string) {
   const { plan, limits } = await getUserPlanSummary(userId);
-  if (!limits.customOutboundProvider) throw new PlanLimitError(`${plan} plan does not include custom outbound providers. Upgrade to Pro or Business.`);
+  if (!limits.customOutboundProvider) throw new PlanLimitError(`${plan} plan does not include BYO SMTP. Upgrade to Pro or Business.`);
 }
 export async function assertMonthlyForwardAllowed(userId: string) {
   const { plan, limits, usage } = await getUserPlanSummary(userId);
