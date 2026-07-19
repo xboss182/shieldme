@@ -7,7 +7,8 @@ import { assertDomainVerified } from '../domains/domains.service.js';
 import { assertRecipientVerified } from '../recipients/recipients.service.js';
 import type { CreateAliasInput, UpdateAliasInput } from './aliases.schemas.js';
 import { resolveReservedLocalPart } from './reserved-local-parts.js';
-import { assertCanCreateAlias, assertOutboundProviderAllowed, assertPgpAllowed } from '../plans/plans.js';
+import { assertCanCreateAlias, assertOutboundProviderAllowed, assertPgpAllowed, assertByoSmtpAllowed } from '../plans/plans.js';
+
 
 export const RESERVED_ALIAS_ERROR_CODE = 'RESERVED_ALIAS';
 
@@ -172,6 +173,26 @@ export async function createAlias(ownerId: string, input: CreateAliasInput) {
     }
   }
   throw new AliasError('Could not generate a unique alias. Please try again.', 409);
+}
+
+export async function setAliasOutboundRoute(ownerId: string, aliasId: string, input: { mode: 'platform' } | { mode: 'custom_smtp'; relayId: string; acknowledgeNoFallback: true }) {
+  const alias = await db.query.aliases.findFirst({
+    where: and(eq(aliases.id, aliasId), eq(aliases.ownerId, ownerId), ne(aliases.status, 'deleted')),
+  });
+  if (!alias) throw new AliasError('Alias not found', 404);
+  const { writeAuditLog } = await import('../admin/admin.service.js');
+  if (input.mode === 'platform') {
+    const [updated] = await db.update(aliases).set({ outboundMode: 'platform', smtpRelayId: null, updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
+    await writeAuditLog('alias.outbound_route_platform', 'alias', aliasId, {}, { type: 'user', id: ownerId });
+    return updated;
+  }
+  await assertByoSmtpAllowed(ownerId);
+  const { assertCustomRelayCanAccept } = await import('../smtp-relays/service.js');
+  const relay = await assertCustomRelayCanAccept(ownerId, input.relayId);
+  if (relay.domainId !== alias.domainId) throw new AliasError('Relay must belong to the alias domain', 422, 'RELAY_DOMAIN_MISMATCH');
+  const [updated] = await db.update(aliases).set({ outboundMode: 'custom_smtp', smtpRelayId: relay.id, updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
+  await writeAuditLog('alias.outbound_route_custom_smtp', 'alias', aliasId, { relayId: relay.id }, { type: 'user', id: ownerId });
+  return updated;
 }
 
 export async function updateAlias(ownerId: string, aliasId: string, input: UpdateAliasInput) {

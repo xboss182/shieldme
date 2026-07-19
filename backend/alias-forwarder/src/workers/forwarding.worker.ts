@@ -11,11 +11,37 @@ import { emailForwardingQueueName, type EmailForwardingJob, type EmailForwarding
 import { decryptQueuePayload } from '../queues/secure-email-jobs.js';
 import { buildForwardBanner, buildForwardBannerText } from '../lib/forward-banner.js';
 import { getArmoredKeyForRecipient, encryptWithPgpKey } from '../modules/pgp/pgp.service.js';
-import { assertMonthlyForwardAllowed, assertOutboundProviderAllowed, PlanLimitError } from '../modules/plans/plans.js';
+import { assertByoSmtpAllowed, assertMonthlyForwardAllowed, assertOutboundProviderAllowed, PlanLimitError } from '../modules/plans/plans.js';
 import { buildSpamHeaders, tagSubject, type SpamScanMetadata } from '../modules/spam/spam-scanner.service.js';
 import { env } from '../config/env.js';
 import { protectEmailTracking } from '../modules/tracking/tracking-protection.service.js';
 import { recordTtiForwarded } from '../modules/tti/tti.service.js';
+import { buildBounceToken, hashBounceToken, recordCustomSmtpFailure, recordCustomSmtpSuccess, resolveCustomSmtpDelivery } from '../modules/smtp-relays/service.js';
+import { sendSmtpRelayMessage } from '../modules/smtp-relays/transport.js';
+import { acquireRelaySlot } from '../modules/smtp-relays/concurrency.js';
+
+function replyToFromEnvelope(value: string): string | undefined {
+  const mailbox = value.trim();
+  return /^[^\s<>@\"]+@[^\s<>@\"]+\.[^\s<>@\"]+$/.test(mailbox) ? mailbox : undefined;
+}
+
+function smtpForwardFrom(value: string, identity: string): string {
+  const display = value.replace(/[^\p{L}\p{N} ._-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+  return display ? `"${display} via ShieldMe" <${identity}>` : `ShieldMe <${identity}>`;
+}
+
+function headerValue(value: string): string {
+  return value.replace(/[\r\n]/g, ' ').slice(0, 500);
+}
+
+function customSmtpFailureCode(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (/auth|login|credential/.test(message)) return 'custom_smtp_auth_failure';
+  if (/tls|certificate|starttls/.test(message)) return 'custom_smtp_tls_failure';
+  if (/dns|host|unsafe/.test(message)) return 'custom_smtp_dns_failure';
+  if (/timeout|connect|socket|greeting/.test(message)) return 'custom_smtp_connection_failure';
+  return 'custom_smtp_send_failure';
+}
 
 async function processForwardingJob(job: Job<EmailForwardingJob>) {
   let payload: EmailForwardingPayload;
@@ -30,7 +56,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
 
   logger.info({ jobId: job.id, logId, aliasId }, 'Processing forwarding job');
 
-  if (!isOutboundConfigured()) {
+  if (payload.routeMode !== 'custom_smtp' && !isOutboundConfigured()) {
     logger.warn({ jobId: job.id, logId }, 'Outbound provider not configured — forwarding skipped');
     await db.update(mailLogs).set({ status: 'failed', rejectionReason: 'outbound_not_configured', updatedAt: new Date() }).where(eq(mailLogs.id, logId));
     return;
@@ -73,7 +99,8 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
 
   try {
     await assertMonthlyForwardAllowed(ownerId);
-    await assertOutboundProviderAllowed(ownerId);
+    if (payload.routeMode === 'custom_smtp') await assertByoSmtpAllowed(ownerId);
+    else await assertOutboundProviderAllowed(ownerId);
   } catch (err) {
     if (err instanceof PlanLimitError) {
       await db.update(mailLogs).set({ status: 'rejected', rejectionReason: 'plan_limit_exceeded', updatedAt: new Date() }).where(eq(mailLogs.id, logId));
@@ -174,10 +201,10 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
 
   const headers: Record<string, string> = {
-    'X-Original-Sender': originalFrom,
-    'X-Forwarded-For-Alias': log.envelopeTo,
+    'X-Original-Sender': headerValue(originalFrom),
+    'X-Forwarded-For-Alias': headerValue(log.envelopeTo),
   };
-  if (log.externalMessageId) headers['X-Original-Message-Id'] = log.externalMessageId;
+  if (log.externalMessageId) headers['X-Original-Message-Id'] = headerValue(log.externalMessageId);
   if (pgpEncrypted) headers['X-PGP-Encrypted'] = 'true';
   if (trackingProtection.metadata.enabled) {
     headers['X-ShieldMe-Tracking-Protection'] = 'enabled';
@@ -186,26 +213,66 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
+  const customSmtp = payload.routeMode === 'custom_smtp';
   let outboundMessageId: string;
   try {
-    outboundMessageId = await sendOutbound({
-    from: forwardFrom,
-    to: recipient.email,
-    subject,
-    replyTo: originalFrom,
-    textBody,
-    htmlBody,
-    headers,
-    }, { pgpRequired: pgpMode === 'required', pgpEncrypted });
+    if (customSmtp) {
+      if (!payload.relayId || !payload.credentialVersion) throw new Error('custom_smtp_route_snapshot_missing');
+      const { relay, transport } = await resolveCustomSmtpDelivery(ownerId, payload.relayId, payload.credentialVersion, payload.halfOpenProbe);
+      const release = await acquireRelaySlot(ownerId, relay.id);
+      try {
+        const bounceToken = buildBounceToken();
+        const envelopeFrom = `b+${bounceToken}@sm-bounces.${domain.domain}`;
+        const identity = `${relay.identityLocalPart}@${domain.domain}`;
+        outboundMessageId = await sendSmtpRelayMessage(transport, {
+          from: smtpForwardFrom(originalFrom, identity),
+          to: recipient.email,
+          subject,
+          replyTo: replyToFromEnvelope(originalFrom),
+          textBody,
+          htmlBody,
+          headers,
+          envelopeFrom,
+        });
+        await recordCustomSmtpSuccess(relay.id);
+        await db.update(mailLogs).set({ bounceTokenHash: hashBounceToken(bounceToken), bounceExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }).where(eq(mailLogs.id, logId));
+      } finally {
+        await release();
+      }
+    } else {
+      outboundMessageId = await sendOutbound({
+        from: forwardFrom,
+        to: recipient.email,
+        subject,
+        replyTo: replyToFromEnvelope(originalFrom),
+        textBody,
+        htmlBody,
+        headers,
+      }, { pgpRequired: pgpMode === 'required', pgpEncrypted });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'outbound_send_failed';
-    const permanent = /invalid|suppressed|blocked|complaint|bounce|permanent|5\d\d/i.test(message);
-    await db.update(mailLogs).set({ status: permanent ? 'failed' : 'queued', outboundProvider: getOutboundProvider(), failureType: permanent ? 'permanent' : 'transient', failureReason: message.slice(0, 500), rejectionReason: message.slice(0, 500), updatedAt: new Date() }).where(eq(mailLogs.id, logId));
-    if (permanent) return;
+    const customRouteUnavailable = /custom_smtp_route_snapshot_missing|relay_unavailable|credential_version_unavailable|BYO SMTP is unavailable|Relay credentials are unavailable/.test(message);
+    const permanent = customRouteUnavailable || /invalid|suppressed|blocked|complaint|bounce|permanent|5\d\d|auth|tls|certificate|dns|unsafe/.test(message);
+    const exhausted = job.attemptsMade + 1 >= 3;
+    const failureCode = customSmtp ? customSmtpFailureCode(err) : message.slice(0, 80);
+    if (customSmtp && payload.relayId && !customRouteUnavailable) await recordCustomSmtpFailure(payload.relayId, failureCode);
+    await db.update(mailLogs).set({
+      status: permanent || exhausted ? 'failed' : 'queued',
+      outboundProvider: customSmtp ? 'custom_smtp' : getOutboundProvider(),
+      failureType: permanent || exhausted ? 'permanent' : 'transient',
+      failureReason: customSmtp ? failureCode : message.slice(0, 500),
+      rejectionReason: customSmtp ? failureCode : message.slice(0, 500),
+      smtpResponseClass: customSmtp ? (permanent ? '5xx' : '4xx') : null,
+      attemptCount: job.attemptsMade + 1,
+      nextAttemptAt: permanent || exhausted ? null : new Date(Date.now() + 30_000 * 2 ** job.attemptsMade),
+      updatedAt: new Date(),
+    }).where(eq(mailLogs.id, logId));
+    if (permanent || exhausted || (customSmtp && payload.halfOpenProbe)) return;
     throw err;
   }
 
-  await db.update(mailLogs).set({ status: 'delivered', resendMessageId: outboundMessageId, outboundProvider: getOutboundProvider(), trackingProtection: trackingProtection.metadata, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
+  await db.update(mailLogs).set({ status: 'delivered', resendMessageId: customSmtp ? null : outboundMessageId, providerMessageId: outboundMessageId, outboundProvider: customSmtp ? 'custom_smtp' : getOutboundProvider(), smtpResponseClass: customSmtp ? '2xx' : null, attemptCount: job.attemptsMade + 1, trackingProtection: trackingProtection.metadata, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
   const ttiProbeToken = subject.match(/\[shieldme-tti:([a-zA-Z0-9_-]{8,128})\]/)?.[1];
   if (ttiProbeToken) {
     await recordTtiForwarded({

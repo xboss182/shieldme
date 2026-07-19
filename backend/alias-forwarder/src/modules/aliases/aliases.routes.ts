@@ -12,8 +12,10 @@ import {
   AliasError,
   getAliasStats,
   listFailedDeliveries,
+  setAliasOutboundRoute,
 } from './aliases.service.js';
 import { createAliasSchema, updateAliasSchema } from './aliases.schemas.js';
+import { outboundRouteSchema } from '../smtp-relays/schemas.js';
 
 export const aliasesRouter = Router();
 aliasesRouter.use(authenticate);
@@ -64,6 +66,14 @@ aliasesRouter.patch('/:id', async (req: Request, res: Response, next: NextFuncti
   try {
     const input = updateAliasSchema.parse(req.body);
     const alias = await updateAlias(req.auth!.userId, String(req.params.id), input);
+    res.json({ alias });
+  } catch (err) { next(err); }
+});
+
+// PUT /api/aliases/:id/outbound-route
+aliasesRouter.put('/:id/outbound-route', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const alias = await setAliasOutboundRoute(req.auth!.userId, String(req.params.id), outboundRouteSchema.parse(req.body));
     res.json({ alias });
   } catch (err) { next(err); }
 });

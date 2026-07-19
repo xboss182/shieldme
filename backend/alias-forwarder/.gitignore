@@ -13,6 +13,7 @@ logs/
 *.db
 *.sql
 !drizzle/operational/*.sql
+!drizzle/0005_cold_amazoness.sql
 *.dump
 *.bak
 backups/
