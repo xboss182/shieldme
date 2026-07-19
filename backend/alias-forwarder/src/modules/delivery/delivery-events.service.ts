@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { mailLogs, deliveryFailureLog } from '../../db/schema.js';
 import { addToSuppressionList } from '../abuse/abuse.service.js';
+import { relayDeliveryEventsTotal } from '../smtp-relays/metrics.js';
 
 export type DeliveryProvider = 'resend' | 'ses';
 export type DeliveryEventType = 'delivered' | 'failed' | 'bounced' | 'complained';
@@ -35,6 +36,7 @@ function failureReasonForEvent(type: DeliveryEventType): 'bounce' | 'complaint' 
 }
 
 export async function recordDeliveryEvent(event: NormalizedDeliveryEvent): Promise<void> {
+  relayDeliveryEventsTotal.inc({ event: event.type });
   const status = statusForEvent(event.type);
   const failureReason = safeReason(event.reason);
 

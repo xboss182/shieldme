@@ -1,0 +1,11 @@
+[Unit]
+Description=Resolve ShieldMe approved SMTP relay egress addresses
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/libexec/shieldme-sync-relay-egress.py /etc/shieldme/relay-approved-hosts shieldme_relay_egress approved_ipv4 approved_ipv6
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+---
+- name: restart shieldme relay kms
+  ansible.builtin.systemd:
+    name: shieldme-relay-kms
+    state: restarted
+    daemon_reload: true

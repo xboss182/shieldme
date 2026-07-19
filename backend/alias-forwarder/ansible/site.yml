@@ -15,3 +15,5 @@
       tags: [caddy]
     - role: mail_security
       tags: [mail, dns]
+    - role: relay_security
+      tags: [relay, security, monitoring]

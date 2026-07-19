@@ -3,13 +3,15 @@ import dns from 'node:dns/promises';
 import { and, count, desc, eq, gte, lte, min, ne } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { aliases, auditLogs, domainSigningKeys, domains, mailLogs, recipients, smtpRelayCredentials, smtpRelayProfiles, smtpRelayTests } from '../../db/schema.js';
-import { getPlatformDomain, isByoSmtpEnabledForOwner } from '../../config/runtime-config.js';
+import { getPlatformDomain, isApprovedRelayHost, isByoSmtpEnabledForOwner } from '../../config/runtime-config.js';
+import { env } from '../../config/env.js';
 import { generateToken, hashToken, verifyToken } from '../../lib/tokens.js';
 import { writeAuditLog } from '../admin/admin.service.js';
 import { assertByoSmtpAllowed } from '../plans/plans.js';
 import { decryptRelaySecret, encryptRelaySecret } from './crypto.js';
 import { resolvePublicRelayHost, RelayEndpointError } from './ssrf.js';
 import { sendSmtpRelayMessage, verifySmtpRelay, type RelayTransportConfig } from './transport.js';
+import { relayCircuitOpeningsTotal, relayFailuresTotal, relayTestsTotal } from './metrics.js';
 import type { CreateSmtpRelayInput, RotateSmtpRelayCredentialsInput } from './schemas.js';
 
 const TEST_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -26,7 +28,19 @@ type RelayCredentials = { username: string; password: string };
 type RelayRow = typeof smtpRelayProfiles.$inferSelect;
 
 function requireByoSmtp(ownerId: string) {
-  if (!isByoSmtpEnabledForOwner(ownerId)) throw new SmtpRelayError('BYO SMTP is unavailable', 403, 'byo_smtp_disabled');
+  if (!isByoSmtpEnabledForOwner(ownerId) || !(process.env['BYO_SMTP_APPROVED_HOSTS'] ?? '').trim()) throw new SmtpRelayError('BYO SMTP is unavailable', 403, 'byo_smtp_disabled');
+}
+
+function requireApprovedRelayHost(host: string) {
+  if (!isApprovedRelayHost(host)) throw new SmtpRelayError('SMTP relay host is not approved for the pilot', 422, 'relay_host_not_approved');
+}
+
+export async function assertByoSmtpPilotQuota(ownerId: string) {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const [row] = await db.select({ value: count() }).from(mailLogs).innerJoin(aliases, eq(mailLogs.aliasId, aliases.id)).where(and(eq(aliases.ownerId, ownerId), eq(mailLogs.outboundRouteMode, 'custom_smtp'), eq(mailLogs.status, 'delivered'), gte(mailLogs.createdAt, monthStart)));
+  if (Number(row?.value ?? 0) >= env.BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS) throw new SmtpRelayError('BYO SMTP pilot quota reached', 429, 'byo_smtp_pilot_quota_reached');
 }
 
 async function redactedRelay(row: RelayRow) {
@@ -127,8 +141,13 @@ async function decryptCredentials(ownerId: string, relayId: string, version: num
 async function getSigningPrivateKey(ownerId: string, domainId: string) {
   const key = await db.query.domainSigningKeys.findFirst({ where: and(eq(domainSigningKeys.domainId, domainId), eq(domainSigningKeys.status, 'verified')) });
   if (!key) throw new SmtpRelayError('DKIM key is not verified', 422, 'dkim_not_verified');
-  const result = await decryptRelaySecret<{ privateKey: string }>('domain_signing_key', ownerId, key.id, 1, key);
-  return { selector: key.selector, privateKey: result.privateKey };
+  try {
+    const result = await decryptRelaySecret<{ privateKey: string }>('domain_signing_key', ownerId, key.id, 1, key);
+    return { selector: key.selector, privateKey: result.privateKey };
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'signing' });
+    throw error;
+  }
 }
 
 async function transportConfig(ownerId: string, relay: RelayRow, version: number) {
@@ -156,7 +175,13 @@ export async function createSmtpRelay(ownerId: string, input: CreateSmtpRelayInp
   requireByoSmtp(ownerId);
   await assertByoSmtpAllowed(ownerId);
   const domain = await getOwnedVerifiedDomain(ownerId, input.domainId);
-  await resolvePublicRelayHost(input.host);
+  requireApprovedRelayHost(input.host);
+  try {
+    await resolvePublicRelayHost(input.host);
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'ssrf' });
+    throw error;
+  }
   const id = randomUUID();
   const credentials = await encryptRelaySecret('smtp_credentials', ownerId, id, 1, { username: input.username, password: input.password });
   try {
@@ -224,6 +249,7 @@ async function assertTestLimit(ownerId: string, relayId: string) {
 export async function testSmtpRelay(ownerId: string, relayId: string, recipientId: string) {
   requireByoSmtp(ownerId);
   const relay = await getOwnedRelay(ownerId, relayId);
+  requireApprovedRelayHost(relay.host);
   if (relay.isSuspended || ['revoked', 'disabled'].includes(relay.status)) throw new SmtpRelayError('Relay is disabled', 422, 'relay_disabled');
   await assertTestLimit(ownerId, relayId);
   const recipient = await db.query.recipients.findFirst({ where: and(eq(recipients.id, recipientId), eq(recipients.ownerId, ownerId), eq(recipients.status, 'verified'), eq(recipients.isActive, true)) });
@@ -243,10 +269,12 @@ export async function testSmtpRelay(ownerId: string, relayId: string, recipientI
   await markTesting('testing_dns', 'testing_dns');
   try {
     await verifyDomainReadiness(ownerId, domain, relay);
+    relayTestsTotal.inc({ phase: 'dns', outcome: 'success' });
     await markTesting('testing_tls', 'testing_tls');
     const config = await transportConfig(ownerId, relay, credentialVersion);
     await resolvePublicRelayHost(relay.host);
     await verifySmtpRelay(config);
+    relayTestsTotal.inc({ phase: 'tls_auth', outcome: 'success' });
     await markTesting('testing_auth', 'testing_auth');
     const sender = `${relay.identityLocalPart}@${domain.domain}`;
     await sendSmtpRelayMessage(config, {
@@ -274,6 +302,7 @@ export async function testSmtpRelay(ownerId: string, relayId: string, recipientI
     await writeAuditLog('smtp_relay.test_submitted', 'smtp_relay', relayId, { testId, recipientId }, { type: 'user', id: ownerId });
     return { id: testId, status: 'awaiting_recipient_confirmation', expiresAt: new Date(Date.now() + TEST_TOKEN_TTL_MS) };
   } catch (error) {
+    relayTestsTotal.inc({ phase: 'relay', outcome: 'failure' });
     const code = error instanceof SmtpRelayError || error instanceof RelayEndpointError ? error.code : 'smtp_test_failed';
     if (rotatingActiveRelay) {
       await db.update(smtpRelayProfiles).set({ status: 'active', lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
@@ -291,6 +320,7 @@ export async function confirmSmtpRelayTest(ownerId: string, relayId: string, tes
   if (!test || test.confirmedAt || test.tokenExpiresAt < new Date() || !(await verifyToken(token, test.tokenHash))) throw new SmtpRelayError('Relay test confirmation is invalid or expired', 422, 'relay_test_invalid');
   const relay = await getOwnedRelay(ownerId, relayId);
   const previousVersion = relay.activeCredentialVersion;
+  relayTestsTotal.inc({ phase: 'recipient_confirmation', outcome: 'success' });
   await db.update(smtpRelayTests).set({ phase: 'confirmed', outcomeCode: 'recipient_confirmed', confirmedAt: new Date() }).where(eq(smtpRelayTests.id, test.id));
   await db.update(smtpRelayProfiles).set({ status: previousVersion ? 'active' : 'ready', activeCredentialVersion: test.credentialVersion, circuitStatus: 'closed', circuitFailureCount: 0, circuitUntil: null, lastOutcomeCode: 'recipient_confirmed', updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
   if (previousVersion && previousVersion !== test.credentialVersion) {
@@ -379,6 +409,7 @@ export async function resolveCustomSmtpDelivery(ownerId: string, relayId: string
   await db.delete(smtpRelayCredentials).where(lte(smtpRelayCredentials.revokedAt, new Date()));
   requireByoSmtp(ownerId);
   const relay = halfOpenProbe ? await getOwnedRelay(ownerId, relayId) : await assertCustomRelayCanAccept(ownerId, relayId, true);
+  requireApprovedRelayHost(relay.host);
   if (halfOpenProbe && relay.circuitStatus !== 'half_open') throw new SmtpRelayError('Custom SMTP relay is unavailable', 451, 'relay_unavailable');
   if (relay.activeCredentialVersion !== credentialVersion) {
     const retained = await db.query.smtpRelayCredentials.findFirst({
@@ -396,6 +427,7 @@ export async function recordCustomSmtpFailure(relayId: string, code: string) {
   const immediate = /auth|tls|certificate|unsafe|dns/.test(code);
   const failures = relay.circuitFailureCount + 1;
   const open = immediate || failures >= 3;
+  if (open && relay.circuitStatus !== 'open') relayCircuitOpeningsTotal.inc();
   const cooldownMinutes = Math.min(360, 15 * 2 ** Math.max(0, failures - 3));
   await db.update(smtpRelayProfiles).set({
     status: open ? 'circuit_open' : 'degraded',
