@@ -1,0 +1,28 @@
+groups:
+  - name: shieldme-relay
+    rules:
+      - alert: ShieldMeRelaySecurityFailure
+        expr: sum(increase(shieldme_smtp_relay_failures_total{phase=~"ssrf|tls|auth|secret_decrypt|secret_encrypt|signing"}[5m])) > 0
+        for: 2m
+        labels: { severity: warning }
+        annotations: { summary: ShieldMe relay security failure, runbook: docs/relay-pilot-runbook.md }
+      - alert: ShieldMeRelayCircuitOpen
+        expr: increase(shieldme_smtp_relay_circuit_openings_total[15m]) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations: { summary: ShieldMe relay circuit opened, runbook: docs/relay-pilot-runbook.md }
+      - alert: ShieldMeRelayQueueBacklog
+        expr: shieldme_smtp_relay_queue_depth > 10 or shieldme_smtp_relay_queue_oldest_age_seconds > 900
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: ShieldMe relay queue backlog, runbook: docs/relay-pilot-runbook.md }
+      - alert: ShieldMeRelayRetryBurst
+        expr: increase(shieldme_smtp_relay_retries_total[15m]) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: ShieldMe relay retry burst, runbook: docs/relay-pilot-runbook.md }
+      - alert: ShieldMeDeliveryFailureEvents
+        expr: sum(increase(shieldme_delivery_events_total{event=~"failed|bounced|complained"}[15m])) > 0
+        for: 0m
+        labels: { severity: warning }
+        annotations: { summary: ShieldMe delivery failure, bounce, or complaint, runbook: docs/relay-pilot-runbook.md }

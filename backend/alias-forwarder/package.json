@@ -20,6 +20,9 @@
     "reserved:check": "tsx src/scripts/generate-reserved-local-parts.ts --check",
     "reserved:apply": "tsx src/scripts/apply-reserved-local-parts.ts",
     "reserved:collisions": "tsx src/scripts/report-reserved-local-part-collisions.ts",
+    "relay:kek:rotate": "tsx src/scripts/rotate-relay-kek.ts",
+    "relay:restore:verify": "tsx src/scripts/verify-relay-restore.ts",
+    "relay:egress:verify": "./scripts/verify-relay-egress.sh",
     "security:audit": "npm audit --audit-level=high",
     "audit": "npm audit --omit=dev --audit-level=high"
   },

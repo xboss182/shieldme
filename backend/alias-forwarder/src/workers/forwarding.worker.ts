@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { createServer } from 'node:http';
 import { Worker, type Job } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import { redis } from '../lib/redis.js';
@@ -16,9 +17,13 @@ import { buildSpamHeaders, tagSubject, type SpamScanMetadata } from '../modules/
 import { env } from '../config/env.js';
 import { protectEmailTracking } from '../modules/tracking/tracking-protection.service.js';
 import { recordTtiForwarded } from '../modules/tti/tti.service.js';
-import { buildBounceToken, hashBounceToken, recordCustomSmtpFailure, recordCustomSmtpSuccess, resolveCustomSmtpDelivery } from '../modules/smtp-relays/service.js';
+import { assertByoSmtpPilotQuota, buildBounceToken, hashBounceToken, recordCustomSmtpFailure, recordCustomSmtpSuccess, resolveCustomSmtpDelivery } from '../modules/smtp-relays/service.js';
 import { sendSmtpRelayMessage } from '../modules/smtp-relays/transport.js';
 import { acquireRelaySlot } from '../modules/smtp-relays/concurrency.js';
+import { relayFailuresTotal, relayMetrics, relayMetricsContentType, relayQueueWaitSeconds, relayRetriesTotal, relaySubmissionsTotal } from '../modules/smtp-relays/metrics.js';
+import { configureRelayKmsFromEnv } from '../modules/smtp-relays/local-kms.js';
+
+configureRelayKmsFromEnv();
 
 function replyToFromEnvelope(value: string): string | undefined {
   const mailbox = value.trim();
@@ -38,7 +43,9 @@ function customSmtpFailureCode(error: unknown): string {
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   if (/auth|login|credential/.test(message)) return 'custom_smtp_auth_failure';
   if (/tls|certificate|starttls/.test(message)) return 'custom_smtp_tls_failure';
-  if (/dns|host|unsafe/.test(message)) return 'custom_smtp_dns_failure';
+  if (/dkim|signing/.test(message)) return 'custom_smtp_signing_failure';
+  if (/kms|secret_decrypt/.test(message)) return 'custom_smtp_secret_decrypt_failure';
+  if (/dns|host|unsafe/.test(message)) return 'custom_smtp_ssrf_failure';
   if (/timeout|connect|socket|greeting/.test(message)) return 'custom_smtp_connection_failure';
   return 'custom_smtp_send_failure';
 }
@@ -99,7 +106,9 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
 
   try {
     await assertMonthlyForwardAllowed(ownerId);
-    if (payload.routeMode === 'custom_smtp') await assertByoSmtpAllowed(ownerId);
+    if (payload.routeMode === 'custom_smtp') {
+      await assertByoSmtpAllowed(ownerId);
+    }
     else await assertOutboundProviderAllowed(ownerId);
   } catch (err) {
     if (err instanceof PlanLimitError) {
@@ -214,6 +223,8 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
   const customSmtp = payload.routeMode === 'custom_smtp';
+  if (customSmtp && job.attemptsMade > 0) relayRetriesTotal.inc();
+  if (customSmtp && log.createdAt instanceof Date) relayQueueWaitSeconds.observe(Math.max(0, (Date.now() - log.createdAt.getTime()) / 1_000));
   let outboundMessageId: string;
   try {
     if (customSmtp) {
@@ -221,6 +232,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
       const { relay, transport } = await resolveCustomSmtpDelivery(ownerId, payload.relayId, payload.credentialVersion, payload.halfOpenProbe);
       const release = await acquireRelaySlot(ownerId, relay.id);
       try {
+        await assertByoSmtpPilotQuota(ownerId);
         const bounceToken = buildBounceToken();
         const envelopeFrom = `b+${bounceToken}@sm-bounces.${domain.domain}`;
         const identity = `${relay.identityLocalPart}@${domain.domain}`;
@@ -235,6 +247,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
           envelopeFrom,
         });
         await recordCustomSmtpSuccess(relay.id);
+        relaySubmissionsTotal.inc();
         await db.update(mailLogs).set({ bounceTokenHash: hashBounceToken(bounceToken), bounceExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }).where(eq(mailLogs.id, logId));
       } finally {
         await release();
@@ -256,6 +269,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
     const permanent = customRouteUnavailable || /invalid|suppressed|blocked|complaint|bounce|permanent|5\d\d|auth|tls|certificate|dns|unsafe/.test(message);
     const exhausted = job.attemptsMade + 1 >= 3;
     const failureCode = customSmtp ? customSmtpFailureCode(err) : message.slice(0, 80);
+    if (customSmtp) relayFailuresTotal.inc({ phase: failureCode.replace('custom_smtp_', '').replace('_failure', '') });
     if (customSmtp && payload.relayId && !customRouteUnavailable) await recordCustomSmtpFailure(payload.relayId, failureCode);
     await db.update(mailLogs).set({
       status: permanent || exhausted ? 'failed' : 'queued',
@@ -297,5 +311,17 @@ worker.on('failed', (job, err) => {
 worker.on('error', (err) => {
   logger.error({ err: err.message }, 'Worker error');
 });
+
+const metricsPort = env.RELAY_METRICS_PORT;
+if (metricsPort) {
+  createServer(async (_req, res) => {
+    try {
+      res.writeHead(200, { 'Content-Type': relayMetricsContentType });
+      res.end(await relayMetrics());
+    } catch {
+      res.writeHead(503).end();
+    }
+  }).listen(metricsPort, '127.0.0.1');
+}
 
 logger.info('Forwarding worker started');

@@ -54,6 +54,11 @@ const envSchema = z.object({
   EMAIL_QUEUE_PAYLOAD_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
   BYO_SMTP_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   BYO_SMTP_PILOT_OWNER_IDS: z.string().default('').transform((value) => value.split(',').map((id) => id.trim()).filter(Boolean)).refine((ids) => ids.every((id) => z.string().uuid().safeParse(id).success), 'BYO_SMTP_PILOT_OWNER_IDS must contain UUIDs'),
+  BYO_SMTP_APPROVED_HOSTS: z.string().default(''),
+  RELAY_KMS_SOCKET_PATH: z.string().optional(),
+  RELAY_METRICS_PORT: z.coerce.number().int().positive().optional(),
+  BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: z.coerce.number().int().min(1).max(1_000).default(25),
+  BYO_SMTP_PILOT_CONCURRENCY: z.coerce.number().int().min(1).max(5).default(1),
 });
 
 const parsed = envSchema.safeParse(process.env);

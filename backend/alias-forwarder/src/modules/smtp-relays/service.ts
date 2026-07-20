@@ -1,15 +1,17 @@
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import dns from 'node:dns/promises';
-import { and, eq, gte, lte, ne } from 'drizzle-orm';
+import { and, count, desc, eq, exists, gt, gte, isNull, lte, min, ne, notInArray, or, sql } from 'drizzle-orm';
 import { db } from '../../db/client.js';
-import { aliases, domainSigningKeys, domains, recipients, smtpRelayCredentials, smtpRelayProfiles, smtpRelayTests } from '../../db/schema.js';
-import { getPlatformDomain, isByoSmtpEnabledForOwner } from '../../config/runtime-config.js';
+import { aliases, auditLogs, domainSigningKeys, domains, mailLogs, recipients, smtpRelayCredentials, smtpRelayProfiles, smtpRelayTests } from '../../db/schema.js';
+import { getPlatformDomain, isApprovedRelayHost, isByoSmtpEnabledForOwner } from '../../config/runtime-config.js';
+import { env } from '../../config/env.js';
 import { generateToken, hashToken, verifyToken } from '../../lib/tokens.js';
 import { writeAuditLog } from '../admin/admin.service.js';
 import { assertByoSmtpAllowed } from '../plans/plans.js';
 import { decryptRelaySecret, encryptRelaySecret } from './crypto.js';
 import { resolvePublicRelayHost, RelayEndpointError } from './ssrf.js';
 import { sendSmtpRelayMessage, verifySmtpRelay, type RelayTransportConfig } from './transport.js';
+import { relayCircuitOpeningsTotal, relayFailuresTotal, relayTestsTotal } from './metrics.js';
 import type { CreateSmtpRelayInput, RotateSmtpRelayCredentialsInput } from './schemas.js';
 
 const TEST_TOKEN_TTL_MS = 15 * 60 * 1000;
@@ -24,12 +26,29 @@ export class SmtpRelayError extends Error {
 
 type RelayCredentials = { username: string; password: string };
 type RelayRow = typeof smtpRelayProfiles.$inferSelect;
+type RelayTestRow = typeof smtpRelayTests.$inferSelect;
 
 function requireByoSmtp(ownerId: string) {
-  if (!isByoSmtpEnabledForOwner(ownerId)) throw new SmtpRelayError('BYO SMTP is unavailable', 403, 'byo_smtp_disabled');
+  if (!isByoSmtpEnabledForOwner(ownerId) || !(process.env['BYO_SMTP_APPROVED_HOSTS'] ?? '').trim()) throw new SmtpRelayError('BYO SMTP is unavailable', 403, 'byo_smtp_disabled');
 }
 
-function redactedRelay(row: RelayRow) {
+function requireApprovedRelayHost(host: string) {
+  if (!isApprovedRelayHost(host)) throw new SmtpRelayError('SMTP relay host is not approved for the pilot', 422, 'relay_host_not_approved');
+}
+
+export async function assertByoSmtpPilotQuota(ownerId: string) {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const [row] = await db.select({ value: count() }).from(mailLogs).innerJoin(aliases, eq(mailLogs.aliasId, aliases.id)).where(and(eq(aliases.ownerId, ownerId), eq(mailLogs.outboundRouteMode, 'custom_smtp'), eq(mailLogs.status, 'delivered'), gte(mailLogs.createdAt, monthStart)));
+  if (Number(row?.value ?? 0) >= env.BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS) throw new SmtpRelayError('BYO SMTP pilot quota reached', 429, 'byo_smtp_pilot_quota_reached');
+}
+
+async function redactedRelay(row: RelayRow) {
+  const [queue] = await db
+    .select({ queued: count(), retryDeadline: min(mailLogs.nextAttemptAt) })
+    .from(mailLogs)
+    .where(and(eq(mailLogs.smtpRelayId, row.id), eq(mailLogs.status, 'queued'), eq(mailLogs.outboundRouteMode, 'custom_smtp')));
   return {
     id: row.id,
     domainId: row.domainId,
@@ -47,6 +66,7 @@ function redactedRelay(row: RelayRow) {
     lastOutcomeCode: row.lastOutcomeCode,
     lastTestedAt: row.lastTestedAt,
     activeCredentialVersion: row.activeCredentialVersion,
+    queue: { queued: Number(queue?.queued ?? 0), retryDeadline: queue?.retryDeadline ?? null },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -122,8 +142,13 @@ async function decryptCredentials(ownerId: string, relayId: string, version: num
 async function getSigningPrivateKey(ownerId: string, domainId: string) {
   const key = await db.query.domainSigningKeys.findFirst({ where: and(eq(domainSigningKeys.domainId, domainId), eq(domainSigningKeys.status, 'verified')) });
   if (!key) throw new SmtpRelayError('DKIM key is not verified', 422, 'dkim_not_verified');
-  const result = await decryptRelaySecret<{ privateKey: string }>('domain_signing_key', ownerId, key.id, 1, key);
-  return { selector: key.selector, privateKey: result.privateKey };
+  try {
+    const result = await decryptRelaySecret<{ privateKey: string }>('domain_signing_key', ownerId, key.id, 1, key);
+    return { selector: key.selector, privateKey: result.privateKey };
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'signing' });
+    throw error;
+  }
 }
 
 async function transportConfig(ownerId: string, relay: RelayRow, version: number) {
@@ -143,15 +168,46 @@ async function transportConfig(ownerId: string, relay: RelayRow, version: number
   } satisfies RelayTransportConfig;
 }
 
-async function recordRelayOutcome(relayId: string, status: RelayRow['status'], code: string) {
-  await db.update(smtpRelayProfiles).set({ status, lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+async function recordRelayOutcome(relayId: string, status: RelayRow['status'], code: string, credentialVersion?: number) {
+  const conditions = [
+    eq(smtpRelayProfiles.id, relayId),
+    eq(smtpRelayProfiles.isSuspended, false),
+    notInArray(smtpRelayProfiles.status, ['disabled', 'revoked']),
+  ];
+  if (credentialVersion !== undefined) conditions.push(eq(smtpRelayProfiles.pendingCredentialVersion, credentialVersion));
+  const [relay] = await db.update(smtpRelayProfiles)
+    .set({ status, lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() })
+    .where(and(...conditions))
+    .returning({ id: smtpRelayProfiles.id });
+  return Boolean(relay);
+}
+
+export function isRelayTestConfirmable(relay: Pick<RelayRow, 'status' | 'isSuspended' | 'pendingCredentialVersion'> | undefined, test: Pick<RelayTestRow, 'credentialVersion' | 'phase'>, credential: Pick<typeof smtpRelayCredentials.$inferSelect, 'revokedAt'> | undefined, now = new Date()) {
+  return relay !== undefined
+    && test.phase === 'submitted'
+    && relay.status === 'awaiting_recipient_confirmation'
+    && !relay.isSuspended
+    && relay.pendingCredentialVersion === test.credentialVersion
+    && Boolean(credential && (!credential.revokedAt || credential.revokedAt > now));
+}
+
+async function invalidatePendingRelayTests(relayId: string, code: string) {
+  await db.update(smtpRelayTests)
+    .set({ phase: 'failed', outcomeCode: code })
+    .where(and(eq(smtpRelayTests.relayId, relayId), isNull(smtpRelayTests.confirmedAt), notInArray(smtpRelayTests.phase, ['confirmed', 'failed'])));
 }
 
 export async function createSmtpRelay(ownerId: string, input: CreateSmtpRelayInput) {
   requireByoSmtp(ownerId);
   await assertByoSmtpAllowed(ownerId);
   const domain = await getOwnedVerifiedDomain(ownerId, input.domainId);
-  await resolvePublicRelayHost(input.host);
+  requireApprovedRelayHost(input.host);
+  try {
+    await resolvePublicRelayHost(input.host);
+  } catch (error) {
+    relayFailuresTotal.inc({ phase: 'ssrf' });
+    throw error;
+  }
   const id = randomUUID();
   const credentials = await encryptRelaySecret('smtp_credentials', ownerId, id, 1, { username: input.username, password: input.password });
   try {
@@ -170,7 +226,7 @@ export async function createSmtpRelay(ownerId: string, input: CreateSmtpRelayInp
     await db.insert(smtpRelayCredentials).values({ relayId: id, version: 1, ...credentials });
     await createSigningKey(ownerId, domain.id);
     await writeAuditLog('smtp_relay.created', 'smtp_relay', id, { domainId: domain.id, host: relay.host, port: relay.port }, { type: 'user', id: ownerId });
-    return redactedRelay(relay);
+    return await redactedRelay(relay);
   } catch (error) {
     if ((error as { code?: string }).code === '23505') throw new SmtpRelayError('A relay already exists for this domain', 409, 'relay_exists');
     throw error;
@@ -180,12 +236,23 @@ export async function createSmtpRelay(ownerId: string, input: CreateSmtpRelayInp
 export async function listSmtpRelays(ownerId: string) {
   requireByoSmtp(ownerId);
   const relays = await db.query.smtpRelayProfiles.findMany({ where: eq(smtpRelayProfiles.ownerId, ownerId) });
-  return relays.map(redactedRelay);
+  return Promise.all(relays.map(redactedRelay));
 }
 
 export async function getSmtpRelay(ownerId: string, relayId: string) {
   requireByoSmtp(ownerId);
   return redactedRelay(await getOwnedRelay(ownerId, relayId));
+}
+
+export async function listSmtpRelayAuditEvents(ownerId: string, relayId: string) {
+  requireByoSmtp(ownerId);
+  await getOwnedRelay(ownerId, relayId);
+  return db
+    .select({ id: auditLogs.id, timestamp: auditLogs.timestamp, action: auditLogs.action, metadata: auditLogs.metadata })
+    .from(auditLogs)
+    .where(and(eq(auditLogs.targetType, 'smtp_relay'), eq(auditLogs.targetId, relayId)))
+    .orderBy(desc(auditLogs.timestamp))
+    .limit(20);
 }
 
 export async function updateSmtpRelay(ownerId: string, relayId: string, label: string) {
@@ -208,6 +275,7 @@ async function assertTestLimit(ownerId: string, relayId: string) {
 export async function testSmtpRelay(ownerId: string, relayId: string, recipientId: string) {
   requireByoSmtp(ownerId);
   const relay = await getOwnedRelay(ownerId, relayId);
+  requireApprovedRelayHost(relay.host);
   if (relay.isSuspended || ['revoked', 'disabled'].includes(relay.status)) throw new SmtpRelayError('Relay is disabled', 422, 'relay_disabled');
   await assertTestLimit(ownerId, relayId);
   const recipient = await db.query.recipients.findFirst({ where: and(eq(recipients.id, recipientId), eq(recipients.ownerId, ownerId), eq(recipients.status, 'verified'), eq(recipients.isActive, true)) });
@@ -218,19 +286,26 @@ export async function testSmtpRelay(ownerId: string, relayId: string, recipientI
   const credentialVersion = relay.pendingCredentialVersion;
   const rotatingActiveRelay = relay.status === 'active' && relay.activeCredentialVersion !== null;
   const markTesting = async (status: RelayRow['status'], code: string) => {
-    if (rotatingActiveRelay) {
-      await db.update(smtpRelayProfiles).set({ lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relay.id));
-      return;
-    }
-    await db.update(smtpRelayProfiles).set({ status, updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relay.id));
+    const [updated] = await db.update(smtpRelayProfiles)
+      .set(rotatingActiveRelay ? { lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() } : { status, updatedAt: new Date() })
+      .where(and(
+        eq(smtpRelayProfiles.id, relay.id),
+        eq(smtpRelayProfiles.pendingCredentialVersion, credentialVersion),
+        eq(smtpRelayProfiles.isSuspended, false),
+        notInArray(smtpRelayProfiles.status, ['disabled', 'revoked']),
+      ))
+      .returning({ id: smtpRelayProfiles.id });
+    if (!updated) throw new SmtpRelayError('Relay state changed during testing', 409, 'relay_state_changed');
   };
   await markTesting('testing_dns', 'testing_dns');
   try {
     await verifyDomainReadiness(ownerId, domain, relay);
+    relayTestsTotal.inc({ phase: 'dns', outcome: 'success' });
     await markTesting('testing_tls', 'testing_tls');
     const config = await transportConfig(ownerId, relay, credentialVersion);
     await resolvePublicRelayHost(relay.host);
     await verifySmtpRelay(config);
+    relayTestsTotal.inc({ phase: 'tls_auth', outcome: 'success' });
     await markTesting('testing_auth', 'testing_auth');
     const sender = `${relay.identityLocalPart}@${domain.domain}`;
     await sendSmtpRelayMessage(config, {
@@ -254,15 +329,26 @@ export async function testSmtpRelay(ownerId: string, relayId: string, recipientI
       outcomeCode: 'smtp_submitted',
       submittedAt: new Date(),
     });
-    await recordRelayOutcome(relayId, 'awaiting_recipient_confirmation', 'smtp_submitted');
+    if (!(await recordRelayOutcome(relayId, 'awaiting_recipient_confirmation', 'smtp_submitted', credentialVersion))) {
+      await invalidatePendingRelayTests(relayId, 'relay_state_changed');
+      throw new SmtpRelayError('Relay state changed during testing', 409, 'relay_state_changed');
+    }
     await writeAuditLog('smtp_relay.test_submitted', 'smtp_relay', relayId, { testId, recipientId }, { type: 'user', id: ownerId });
     return { id: testId, status: 'awaiting_recipient_confirmation', expiresAt: new Date(Date.now() + TEST_TOKEN_TTL_MS) };
   } catch (error) {
+    relayTestsTotal.inc({ phase: 'relay', outcome: 'failure' });
     const code = error instanceof SmtpRelayError || error instanceof RelayEndpointError ? error.code : 'smtp_test_failed';
     if (rotatingActiveRelay) {
-      await db.update(smtpRelayProfiles).set({ status: 'active', lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+      await db.update(smtpRelayProfiles)
+        .set({ status: 'active', lastOutcomeCode: code, lastTestedAt: new Date(), updatedAt: new Date() })
+        .where(and(
+          eq(smtpRelayProfiles.id, relayId),
+          eq(smtpRelayProfiles.pendingCredentialVersion, credentialVersion),
+          eq(smtpRelayProfiles.isSuspended, false),
+          notInArray(smtpRelayProfiles.status, ['disabled', 'revoked']),
+        ));
     } else {
-      await recordRelayOutcome(relayId, 'degraded', code);
+      await recordRelayOutcome(relayId, 'degraded', code, credentialVersion);
       await recordCustomSmtpFailure(relayId, code);
     }
     throw new SmtpRelayError('SMTP relay test failed', 422, code);
@@ -272,13 +358,53 @@ export async function testSmtpRelay(ownerId: string, relayId: string, recipientI
 export async function confirmSmtpRelayTest(ownerId: string, relayId: string, testId: string, token: string) {
   requireByoSmtp(ownerId);
   const test = await db.query.smtpRelayTests.findFirst({ where: and(eq(smtpRelayTests.id, testId), eq(smtpRelayTests.relayId, relayId), eq(smtpRelayTests.ownerId, ownerId)) });
-  if (!test || test.confirmedAt || test.tokenExpiresAt < new Date() || !(await verifyToken(token, test.tokenHash))) throw new SmtpRelayError('Relay test confirmation is invalid or expired', 422, 'relay_test_invalid');
-  const relay = await getOwnedRelay(ownerId, relayId);
-  const previousVersion = relay.activeCredentialVersion;
-  await db.update(smtpRelayTests).set({ phase: 'confirmed', outcomeCode: 'recipient_confirmed', confirmedAt: new Date() }).where(eq(smtpRelayTests.id, test.id));
-  await db.update(smtpRelayProfiles).set({ status: previousVersion ? 'active' : 'ready', activeCredentialVersion: test.credentialVersion, circuitStatus: 'closed', circuitFailureCount: 0, circuitUntil: null, lastOutcomeCode: 'recipient_confirmed', updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+  const now = new Date();
+  if (!test || test.confirmedAt || test.tokenExpiresAt < now || !(await verifyToken(token, test.tokenHash))) throw new SmtpRelayError('Relay test confirmation is invalid or expired', 422, 'relay_test_invalid');
+  const [currentRelay, credential] = await Promise.all([
+    db.query.smtpRelayProfiles.findFirst({ where: and(eq(smtpRelayProfiles.id, relayId), eq(smtpRelayProfiles.ownerId, ownerId)) }),
+    db.query.smtpRelayCredentials.findFirst({ where: and(eq(smtpRelayCredentials.relayId, relayId), eq(smtpRelayCredentials.version, test.credentialVersion)) }),
+  ]);
+  if (!currentRelay || !isRelayTestConfirmable(currentRelay, test, credential, now)) {
+    await db.update(smtpRelayTests).set({ phase: 'failed', outcomeCode: 'relay_state_changed' }).where(and(eq(smtpRelayTests.id, test.id), isNull(smtpRelayTests.confirmedAt)));
+    throw new SmtpRelayError('Relay state or credentials changed; submit a new test', 409, 'relay_state_changed');
+  }
+  const previousVersion = currentRelay.activeCredentialVersion;
+  const [relay] = await db.update(smtpRelayProfiles)
+    .set({
+      status: sql`case when ${smtpRelayProfiles.activeCredentialVersion} is null then 'ready'::smtp_relay_status else 'active'::smtp_relay_status end`,
+      activeCredentialVersion: test.credentialVersion,
+      circuitStatus: 'closed',
+      circuitFailureCount: 0,
+      circuitUntil: null,
+      lastOutcomeCode: 'recipient_confirmed',
+      updatedAt: now,
+    })
+    .where(and(
+      eq(smtpRelayProfiles.id, relayId),
+      eq(smtpRelayProfiles.ownerId, ownerId),
+      eq(smtpRelayProfiles.status, 'awaiting_recipient_confirmation'),
+      eq(smtpRelayProfiles.isSuspended, false),
+      eq(smtpRelayProfiles.pendingCredentialVersion, test.credentialVersion),
+      exists(db.select({ id: smtpRelayTests.id }).from(smtpRelayTests).where(and(
+        eq(smtpRelayTests.id, test.id),
+        eq(smtpRelayTests.phase, 'submitted'),
+        isNull(smtpRelayTests.confirmedAt),
+      ))),
+      exists(db.select({ version: smtpRelayCredentials.version }).from(smtpRelayCredentials).where(and(
+        eq(smtpRelayCredentials.relayId, relayId),
+        eq(smtpRelayCredentials.version, test.credentialVersion),
+        or(isNull(smtpRelayCredentials.revokedAt), gt(smtpRelayCredentials.revokedAt, now)),
+      ))),
+    ))
+    .returning({ id: smtpRelayProfiles.id });
+  if (!relay) {
+    await db.update(smtpRelayTests).set({ phase: 'failed', outcomeCode: 'relay_state_changed' }).where(and(eq(smtpRelayTests.id, test.id), isNull(smtpRelayTests.confirmedAt)));
+    throw new SmtpRelayError('Relay state or credentials changed; submit a new test', 409, 'relay_state_changed');
+  }
+  relayTestsTotal.inc({ phase: 'recipient_confirmation', outcome: 'success' });
+  await db.update(smtpRelayTests).set({ phase: 'confirmed', outcomeCode: 'recipient_confirmed', confirmedAt: now }).where(and(eq(smtpRelayTests.id, test.id), eq(smtpRelayTests.phase, 'submitted'), isNull(smtpRelayTests.confirmedAt)));
   if (previousVersion && previousVersion !== test.credentialVersion) {
-    await db.update(smtpRelayCredentials).set({ revokedAt: new Date(Date.now() + 30 * 60 * 1000) }).where(and(eq(smtpRelayCredentials.relayId, relayId), eq(smtpRelayCredentials.version, previousVersion)));
+    await db.update(smtpRelayCredentials).set({ revokedAt: new Date(now.getTime() + 30 * 60 * 1000) }).where(and(eq(smtpRelayCredentials.relayId, relayId), eq(smtpRelayCredentials.version, previousVersion)));
   }
   await writeAuditLog('smtp_relay.test_confirmed', 'smtp_relay', relayId, { testId }, { type: 'user', id: ownerId });
   return getSmtpRelay(ownerId, relayId);
@@ -287,10 +413,12 @@ export async function confirmSmtpRelayTest(ownerId: string, relayId: string, tes
 export async function rotateSmtpRelayCredentials(ownerId: string, relayId: string, input: RotateSmtpRelayCredentialsInput) {
   requireByoSmtp(ownerId);
   const relay = await getOwnedRelay(ownerId, relayId);
+  if (relay.isSuspended || ['revoked', 'disabled'].includes(relay.status)) throw new SmtpRelayError('Relay is disabled', 422, 'relay_disabled');
   const version = Math.max(relay.pendingCredentialVersion, relay.activeCredentialVersion ?? 0) + 1;
   const envelope = await encryptRelaySecret('smtp_credentials', ownerId, relayId, version, { username: input.username, password: input.password });
   await db.insert(smtpRelayCredentials).values({ relayId, version, ...envelope });
   await db.update(smtpRelayProfiles).set({ pendingCredentialVersion: version, status: relay.activeCredentialVersion ? 'active' : 'credentials_unverified', updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+  await invalidatePendingRelayTests(relayId, 'credentials_rotated');
   await writeAuditLog('smtp_relay.credentials_rotated_pending_test', 'smtp_relay', relayId, { version }, { type: 'user', id: ownerId });
   return testSmtpRelay(ownerId, relayId, input.recipientId);
 }
@@ -299,6 +427,7 @@ export async function disableSmtpRelay(ownerId: string, relayId: string) {
   requireByoSmtp(ownerId);
   await getOwnedRelay(ownerId, relayId);
   await db.update(smtpRelayProfiles).set({ status: 'disabled', updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+  await invalidatePendingRelayTests(relayId, 'relay_disabled');
   await writeAuditLog('smtp_relay.disabled', 'smtp_relay', relayId, {}, { type: 'user', id: ownerId });
   return getSmtpRelay(ownerId, relayId);
 }
@@ -317,6 +446,7 @@ export async function revokeSmtpRelay(ownerId: string, relayId: string) {
   await getOwnedRelay(ownerId, relayId);
   await db.update(smtpRelayCredentials).set({ revokedAt: new Date() }).where(eq(smtpRelayCredentials.relayId, relayId));
   await db.update(smtpRelayProfiles).set({ status: 'revoked', activeCredentialVersion: null, updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+  await invalidatePendingRelayTests(relayId, 'relay_revoked');
   await writeAuditLog('smtp_relay.revoked', 'smtp_relay', relayId, {}, { type: 'user', id: ownerId });
   return getSmtpRelay(ownerId, relayId);
 }
@@ -332,6 +462,7 @@ export async function deleteSmtpRelay(ownerId: string, relayId: string) {
 
 export async function suspendSmtpRelay(relayId: string) {
   await db.update(smtpRelayProfiles).set({ isSuspended: true, status: 'disabled', updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+  await invalidatePendingRelayTests(relayId, 'relay_suspended');
   await writeAuditLog('smtp_relay.suspended', 'smtp_relay', relayId, {});
 }
 
@@ -363,6 +494,7 @@ export async function resolveCustomSmtpDelivery(ownerId: string, relayId: string
   await db.delete(smtpRelayCredentials).where(lte(smtpRelayCredentials.revokedAt, new Date()));
   requireByoSmtp(ownerId);
   const relay = halfOpenProbe ? await getOwnedRelay(ownerId, relayId) : await assertCustomRelayCanAccept(ownerId, relayId, true);
+  requireApprovedRelayHost(relay.host);
   if (halfOpenProbe && relay.circuitStatus !== 'half_open') throw new SmtpRelayError('Custom SMTP relay is unavailable', 451, 'relay_unavailable');
   if (relay.activeCredentialVersion !== credentialVersion) {
     const retained = await db.query.smtpRelayCredentials.findFirst({
@@ -380,6 +512,7 @@ export async function recordCustomSmtpFailure(relayId: string, code: string) {
   const immediate = /auth|tls|certificate|unsafe|dns/.test(code);
   const failures = relay.circuitFailureCount + 1;
   const open = immediate || failures >= 3;
+  if (open && relay.circuitStatus !== 'open') relayCircuitOpeningsTotal.inc();
   const cooldownMinutes = Math.min(360, 15 * 2 ** Math.max(0, failures - 3));
   await db.update(smtpRelayProfiles).set({
     status: open ? 'circuit_open' : 'degraded',
@@ -389,11 +522,21 @@ export async function recordCustomSmtpFailure(relayId: string, code: string) {
     circuitUntil: open ? new Date(Date.now() + cooldownMinutes * 60 * 1000) : null,
     lastOutcomeCode: code.slice(0, 80),
     updatedAt: new Date(),
-  }).where(eq(smtpRelayProfiles.id, relayId));
+  }).where(and(
+    eq(smtpRelayProfiles.id, relayId),
+    eq(smtpRelayProfiles.isSuspended, false),
+    notInArray(smtpRelayProfiles.status, ['disabled', 'revoked']),
+  ));
 }
 
 export async function recordCustomSmtpSuccess(relayId: string) {
-  await db.update(smtpRelayProfiles).set({ status: 'active', circuitStatus: 'closed', circuitFailureCount: 0, circuitUntil: null, lastOutcomeCode: 'smtp_submitted', updatedAt: new Date() }).where(eq(smtpRelayProfiles.id, relayId));
+  await db.update(smtpRelayProfiles)
+    .set({ status: 'active', circuitStatus: 'closed', circuitFailureCount: 0, circuitUntil: null, lastOutcomeCode: 'smtp_submitted', updatedAt: new Date() })
+    .where(and(
+      eq(smtpRelayProfiles.id, relayId),
+      eq(smtpRelayProfiles.isSuspended, false),
+      notInArray(smtpRelayProfiles.status, ['disabled', 'revoked']),
+    ));
 }
 
 export async function revokeExpiredRelayCredentials() {

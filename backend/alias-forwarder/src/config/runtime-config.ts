@@ -105,6 +105,10 @@ export function isByoSmtpEnabledForOwner(ownerId: string): boolean {
     && (process.env['BYO_SMTP_PILOT_OWNER_IDS'] ?? '').split(',').map((id) => id.trim()).includes(ownerId);
 }
 
+export function isApprovedRelayHost(host: string): boolean {
+  return (process.env['BYO_SMTP_APPROVED_HOSTS'] ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean).includes(host.toLowerCase());
+}
+
 /** Which outbound provider is active: runtime override > env var > default 'resend' */
 export function getOutboundProvider(): OutboundProvider {
   const stored = refreshRuntimeConfig().outboundProvider;

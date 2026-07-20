@@ -9,6 +9,7 @@ import {
   disableSmtpRelay,
   enableSmtpRelay,
   getSmtpRelay,
+  listSmtpRelayAuditEvents,
   listSmtpRelays,
   revokeSmtpRelay,
   rotateSmtpRelayCredentials,
@@ -35,6 +36,9 @@ smtpRelaysRouter.post('/', async (req, res, next) => {
 });
 smtpRelaysRouter.get('/:relayId', async (req, res, next) => {
   try { res.json({ relay: await getSmtpRelay(req.auth!.userId, String(req.params.relayId)) }); } catch (error) { next(error); }
+});
+smtpRelaysRouter.get('/:relayId/audit-events', async (req, res, next) => {
+  try { res.json({ events: await listSmtpRelayAuditEvents(req.auth!.userId, String(req.params.relayId)) }); } catch (error) { next(error); }
 });
 smtpRelaysRouter.patch('/:relayId', async (req, res, next) => {
   try { res.json({ relay: await updateSmtpRelay(req.auth!.userId, String(req.params.relayId), updateSmtpRelaySchema.parse(req.body).label) }); } catch (error) { next(error); }

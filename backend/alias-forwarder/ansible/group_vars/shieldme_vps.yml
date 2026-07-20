@@ -38,6 +38,20 @@ shieldme_env_template:
   SPAM_SCANNER_ENABLED: "true"
   SPAM_SCANNER_ACTION: tag
   TRACKING_PROTECTION_ENABLED: "true"
+  BYO_SMTP_ENABLED: "false"
+  BYO_SMTP_PILOT_OWNER_IDS: ""
+  BYO_SMTP_APPROVED_HOSTS: ""
+  BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: "25"
+  BYO_SMTP_PILOT_CONCURRENCY: "1"
+  RELAY_KMS_SOCKET_PATH: /run/shieldme-relay-kms/kms.sock
+  RELAY_METRICS_PORT: "9405"
+shieldme_relay_security_apply: false
+shieldme_relay_feature_flag: false
+shieldme_relay_kms_active_key_id: v1
+shieldme_relay_pilot_owner_ids: []
+shieldme_relay_approved_hosts: []
+shieldme_relay_metrics_port: 9405
+shieldme_prometheus_rules_path: /etc/prometheus/rules
 base_os_disable_password_ssh: true
 base_os_disable_swap: false
 base_os_disable_core_dumps: false
