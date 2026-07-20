@@ -1,4 +1,4 @@
-import { bigint, boolean, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 // ── Users (Stage 1) ─────────────────────────────────────────────────────────
@@ -41,7 +41,9 @@ export const domains = pgTable('domains', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [
+  unique('domains_id_owner_id_unique').on(t.id, t.ownerId),
+]);
 
 // ── Recipients (Stage 2) ─────────────────────────────────────────────────────
 export const recipientStatusEnum = pgEnum('recipient_status', [
@@ -63,6 +65,99 @@ export const recipients = pgTable('recipients', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+// ── BYO SMTP (Stage 2) ───────────────────────────────────────────────────────
+export const outboundRouteModeEnum = pgEnum('outbound_route_mode', ['platform', 'custom_smtp']);
+export const smtpRelayStatusEnum = pgEnum('smtp_relay_status', [
+  'draft', 'credentials_unverified', 'testing_dns', 'testing_tls', 'testing_auth',
+  'test_submitted', 'awaiting_recipient_confirmation', 'ready', 'active',
+  'degraded', 'circuit_open', 'disabled', 'revoked',
+]);
+export const smtpCircuitStatusEnum = pgEnum('smtp_circuit_status', ['closed', 'open', 'half_open']);
+export const smtpTestPhaseEnum = pgEnum('smtp_test_phase', ['dns', 'tls', 'auth', 'submitted', 'confirmed', 'failed']);
+export const domainSigningKeyStatusEnum = pgEnum('domain_signing_key_status', ['pending', 'verified', 'revoked']);
+
+export const smtpRelayProfiles = pgTable('smtp_relay_profiles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ownerId: uuid('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  domainId: uuid('domain_id').notNull(),
+  label: text('label').notNull(),
+  host: text('host').notNull(),
+  port: integer('port').notNull(),
+  tlsMode: text('tls_mode').notNull(),
+  authMethod: text('auth_method').notNull(),
+  identityLocalPart: text('identity_local_part').notNull(),
+  bounceSpfInclude: text('bounce_spf_include').notNull(),
+  status: smtpRelayStatusEnum('status').notNull().default('credentials_unverified'),
+  circuitStatus: smtpCircuitStatusEnum('circuit_status').notNull().default('closed'),
+  circuitFailureCount: integer('circuit_failure_count').notNull().default(0),
+  circuitOpenedAt: timestamp('circuit_opened_at', { withTimezone: true }),
+  circuitUntil: timestamp('circuit_until', { withTimezone: true }),
+  lastOutcomeCode: text('last_outcome_code'),
+  lastTestedAt: timestamp('last_tested_at', { withTimezone: true }),
+  activeCredentialVersion: integer('active_credential_version'),
+  pendingCredentialVersion: integer('pending_credential_version').notNull().default(1),
+  isSuspended: boolean('is_suspended').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  foreignKey({ name: 'smtp_relay_profiles_domain_owner_fkey', columns: [t.domainId, t.ownerId], foreignColumns: [domains.id, domains.ownerId] }).onDelete('cascade'),
+  unique('smtp_relay_profiles_owner_domain_unique').on(t.ownerId, t.domainId),
+  unique('smtp_relay_profiles_id_owner_domain_unique').on(t.id, t.ownerId, t.domainId),
+  check('smtp_relay_profiles_port_tls_check', sql`(${t.port} = 465 and ${t.tlsMode} = 'implicit_tls') or (${t.port} = 587 and ${t.tlsMode} = 'starttls')`),
+  check('smtp_relay_profiles_auth_check', sql`${t.authMethod} in ('plain', 'login')`),
+]);
+
+export const smtpRelayCredentials = pgTable('smtp_relay_credentials', {
+  relayId: uuid('relay_id').notNull().references(() => smtpRelayProfiles.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  ciphertext: text('ciphertext').notNull(),
+  iv: text('iv').notNull(),
+  tag: text('tag').notNull(),
+  wrappedDek: text('wrapped_dek').notNull(),
+  kekKeyId: text('kek_key_id').notNull(),
+  envelopeVersion: integer('envelope_version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (t) => [
+  unique('smtp_relay_credentials_relay_version_unique').on(t.relayId, t.version),
+]);
+
+export const smtpRelayTests = pgTable('smtp_relay_tests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ownerId: uuid('owner_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  relayId: uuid('relay_id').notNull().references(() => smtpRelayProfiles.id, { onDelete: 'cascade' }),
+  recipientId: uuid('recipient_id').notNull().references(() => recipients.id, { onDelete: 'cascade' }),
+  credentialVersion: integer('credential_version').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }).notNull(),
+  phase: smtpTestPhaseEnum('phase').notNull(),
+  outcomeCode: text('outcome_code').notNull(),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('smtp_relay_tests_owner_created_idx').on(t.ownerId, t.createdAt),
+]);
+
+export const domainSigningKeys = pgTable('domain_signing_keys', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  domainId: uuid('domain_id').notNull().references(() => domains.id, { onDelete: 'cascade' }),
+  selector: text('selector').notNull(),
+  publicKey: text('public_key').notNull(),
+  ciphertext: text('ciphertext').notNull(),
+  iv: text('iv').notNull(),
+  tag: text('tag').notNull(),
+  wrappedDek: text('wrapped_dek').notNull(),
+  kekKeyId: text('kek_key_id').notNull(),
+  envelopeVersion: integer('envelope_version').notNull().default(1),
+  status: domainSigningKeyStatusEnum('status').notNull().default('pending'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  unique('domain_signing_keys_domain_selector_unique').on(t.domainId, t.selector),
+]);
 
 // ── Aliases (Stage 3) ────────────────────────────────────────────────────────
 export const aliasStatusEnum = pgEnum('alias_status', [
@@ -89,8 +184,12 @@ export const aliases = pgTable('aliases', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   pgpMode: pgpModeEnum('pgp_mode').notNull().default('none'),
+  outboundMode: outboundRouteModeEnum('outbound_mode').notNull().default('platform'),
+  smtpRelayId: uuid('smtp_relay_id'),
 }, (t) => [
   unique('aliases_local_part_domain_id_unique').on(t.localPart, t.domainId),
+  foreignKey({ name: 'aliases_smtp_relay_scope_fkey', columns: [t.smtpRelayId, t.ownerId, t.domainId], foreignColumns: [smtpRelayProfiles.id, smtpRelayProfiles.ownerId, smtpRelayProfiles.domainId] }).onDelete('restrict'),
+  check('aliases_outbound_route_check', sql`(${t.outboundMode} = 'platform' and ${t.smtpRelayId} is null) or (${t.outboundMode} = 'custom_smtp' and ${t.smtpRelayId} is not null)`),
 ]);
 
 // ── PGP Keys (Stage 10) ───────────────────────────────────────────────────────
@@ -143,6 +242,14 @@ export const mailLogs = pgTable('mail_logs', {
   spamCategory: text('spam_category'),
   spamAction: text('spam_action'),
   outboundProvider: text('outbound_provider'),
+  outboundRouteMode: outboundRouteModeEnum('outbound_route_mode').notNull().default('platform'),
+  smtpRelayId: uuid('smtp_relay_id').references(() => smtpRelayProfiles.id, { onDelete: 'set null' }),
+  providerMessageId: text('provider_message_id'),
+  smtpResponseClass: text('smtp_response_class'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+  bounceTokenHash: text('bounce_token_hash'),
+  bounceExpiresAt: timestamp('bounce_expires_at', { withTimezone: true }),
   failureType: text('failure_type'),
   failureReason: text('failure_reason'),
   trackingProtection: jsonb('tracking_protection').$type<Record<string, unknown> | null>(),

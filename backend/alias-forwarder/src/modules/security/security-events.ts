@@ -20,7 +20,7 @@ const SECURITY_TARGET_ID = '00000000-0000-0000-0000-000000000000';
 function sanitizeMetadata(metadata: Record<string, unknown> = {}) {
   const redacted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(metadata)) {
-    redacted[key] = /secret|token|password|key/i.test(key) ? '[redacted]' : value;
+    redacted[key] = /secret|token|password|key|username|credential|ciphertext|wrapped|transcript|authorization/i.test(key) ? '[redacted]' : value;
   }
   return redacted;
 }

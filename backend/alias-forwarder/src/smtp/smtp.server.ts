@@ -3,6 +3,7 @@ import SMTPServer from 'smtp-server';
 import { simpleParser } from 'mailparser';
 import type { SMTPServerDataStream, SMTPServerSession } from 'smtp-server';
 import { handleInbound } from '../modules/inbound/inbound.service.js';
+import { processSmtpBounce } from '../modules/bounces/bounces.service.js';
 import { logger } from '../lib/logger.js';
 
 // smtp-server ships CJS; handle ESM interop
@@ -56,6 +57,14 @@ export function createSmtpServer() {
         const errors: string[] = [];
         for (const rcpt of rcptTo) {
           try {
+            const at = rcpt.address.indexOf('@');
+            const localPart = at === -1 ? '' : rcpt.address.slice(0, at);
+            const domain = at === -1 ? '' : rcpt.address.slice(at + 1).toLowerCase();
+            const bounceToken = domain.startsWith('sm-bounces.') ? localPart.match(/^b\+([a-f0-9]{48,128})$/i)?.[1] : undefined;
+            if (bounceToken) {
+              if (!(await processSmtpBounce(bounceToken))) throw new Error('Unknown bounce recipient');
+              continue;
+            }
             await handleInbound({
               from: session.envelope.mailFrom ? session.envelope.mailFrom.address : '',
               to: rcpt.address,

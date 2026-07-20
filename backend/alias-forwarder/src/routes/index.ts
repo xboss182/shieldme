@@ -9,6 +9,7 @@ import { webhookRouter } from '../modules/webhooks/webhook.routes.js';
 import { pgpRouter, pgpErrorHandler } from '../modules/pgp/pgp.routes.js';
 import { plansRouter, planErrorHandler } from '../modules/plans/plans.routes.js';
 import { deliveryFailuresRouter } from '../modules/delivery/delivery-failures.routes.js';
+import { smtpRelaysRouter, smtpRelayErrorHandler } from '../modules/smtp-relays/routes.js';
 
 export const apiRouter = Router();
 
@@ -18,6 +19,7 @@ apiRouter.use('/domains', domainsRouter);
 apiRouter.use('/recipients', recipientsRouter);
 apiRouter.use('/recipients/:id/pgp-key', pgpRouter);
 apiRouter.use('/aliases', aliasesRouter);
+apiRouter.use('/v2/smtp-relays', smtpRelaysRouter);
 apiRouter.use('/plans', plansRouter);
 apiRouter.use('/admin', adminRouter);
 apiRouter.use('/webhooks', webhookRouter);
@@ -29,5 +31,6 @@ apiRouter.use(domainErrorHandler);
 apiRouter.use(recipientErrorHandler);
 apiRouter.use(pgpErrorHandler);
 apiRouter.use(aliasErrorHandler);
+apiRouter.use(smtpRelayErrorHandler);
 apiRouter.use(adminErrorHandler);
 apiRouter.use(planErrorHandler);

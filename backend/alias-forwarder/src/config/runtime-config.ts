@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { isRelayKmsConfigured } from '../modules/smtp-relays/crypto.js';
 
 /**
  * Runtime config store — holds optional settings that can be configured
@@ -17,12 +18,15 @@ interface RuntimeConfig {
   platformDomain?: string;
   /** Global forwarding kill-switch. When false, all forwarding is disabled. */
   forwardingEnabled: boolean;
+  /** Global BYO SMTP kill-switch. False by default and persisted separately. */
+  byoSmtpEnabled: boolean;
   /** Which outbound email provider to use. Defaults to 'resend'. */
   outboundProvider?: OutboundProvider;
 }
 
 interface PersistedRuntimeConfig {
   forwardingEnabled?: boolean;
+  byoSmtpEnabled?: boolean;
   outboundProvider?: OutboundProvider;
 }
 
@@ -32,22 +36,24 @@ const _store: RuntimeConfig = loadRuntimeConfig();
 
 function loadRuntimeConfig(): RuntimeConfig {
   try {
-    if (!existsSync(runtimeConfigPath)) return { forwardingEnabled: true };
+    if (!existsSync(runtimeConfigPath)) return { forwardingEnabled: true, byoSmtpEnabled: false };
     const parsed = JSON.parse(readFileSync(runtimeConfigPath, 'utf8')) as Partial<RuntimeConfig>;
     return {
       resendApiKey: typeof parsed.resendApiKey === 'string' ? parsed.resendApiKey : undefined,
       platformDomain: typeof parsed.platformDomain === 'string' ? parsed.platformDomain : undefined,
       forwardingEnabled: typeof parsed.forwardingEnabled === 'boolean' ? parsed.forwardingEnabled : true,
+      byoSmtpEnabled: typeof parsed.byoSmtpEnabled === 'boolean' ? parsed.byoSmtpEnabled : false,
       outboundProvider: parsed.outboundProvider === 'ses' ? 'ses' : parsed.outboundProvider === 'resend' ? 'resend' : undefined,
     };
   } catch {
-    return { forwardingEnabled: true };
+    return { forwardingEnabled: true, byoSmtpEnabled: false };
   }
 }
 
 function persistRuntimeConfig(): void {
   const persisted: PersistedRuntimeConfig = {
     forwardingEnabled: _store.forwardingEnabled,
+    byoSmtpEnabled: _store.byoSmtpEnabled,
     outboundProvider: _store.outboundProvider,
   };
   writeFileSync(runtimeConfigPath, `${JSON.stringify(persisted, null, 2)}\n`, { mode: 0o600 });
@@ -56,6 +62,7 @@ function persistRuntimeConfig(): void {
 function refreshRuntimeConfig(): RuntimeConfig {
   const latest = loadRuntimeConfig();
   _store.forwardingEnabled = latest.forwardingEnabled;
+  _store.byoSmtpEnabled = latest.byoSmtpEnabled;
   return _store;
 }
 
@@ -67,6 +74,7 @@ export function setRuntimeConfig(patch: Partial<RuntimeConfig>): void {
   if (patch.resendApiKey !== undefined) _store.resendApiKey = patch.resendApiKey;
   if (patch.platformDomain !== undefined) _store.platformDomain = patch.platformDomain;
   if (patch.forwardingEnabled !== undefined) _store.forwardingEnabled = patch.forwardingEnabled;
+  if (patch.byoSmtpEnabled !== undefined) _store.byoSmtpEnabled = patch.byoSmtpEnabled;
   if (patch.outboundProvider !== undefined) _store.outboundProvider = patch.outboundProvider;
   persistRuntimeConfig();
 }
@@ -84,6 +92,17 @@ export function getPlatformDomain(): string | undefined {
 /** Is global forwarding enabled? */
 export function isForwardingEnabled(): boolean {
   return refreshRuntimeConfig().forwardingEnabled;
+}
+
+export function isByoSmtpRuntimeEnabled(): boolean {
+  return refreshRuntimeConfig().byoSmtpEnabled;
+}
+
+export function isByoSmtpEnabledForOwner(ownerId: string): boolean {
+  return process.env['BYO_SMTP_ENABLED'] === 'true'
+    && isRelayKmsConfigured()
+    && isByoSmtpRuntimeEnabled()
+    && (process.env['BYO_SMTP_PILOT_OWNER_IDS'] ?? '').split(',').map((id) => id.trim()).includes(ownerId);
 }
 
 /** Which outbound provider is active: runtime override > env var > default 'resend' */

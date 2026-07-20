@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { env } from '../../config/env.js';
-import { setRuntimeConfig, getResendApiKey, getPlatformDomain, isForwardingEnabled, getOutboundProvider, isOutboundConfigured } from '../../config/runtime-config.js';
+import { setRuntimeConfig, getResendApiKey, getPlatformDomain, isByoSmtpRuntimeEnabled, isForwardingEnabled, getOutboundProvider, isOutboundConfigured } from '../../config/runtime-config.js';
+import { isRelayKmsConfigured } from '../smtp-relays/crypto.js';
+import { suspendSmtpRelay } from '../smtp-relays/service.js';
 import { adminDisableUser, adminEnableUser, adminSetUserStatus, adminSetUserPlan, listAdminUsers, getAdminUser, adminDisableDomain, adminEnableDomain, adminSetDomainStatus, listAdminDomains, adminDisableAlias, adminEnableAlias, adminSetAliasStatus, adminForceDeleteAlias, listAdminAliases, listAuditLogs, listDeliveries, getAdminStats, writeAuditLog, listReservedLocalParts, createReservedLocalPart, deleteReservedLocalPart, AdminError } from './admin.service.js';
 import { listSecurityEvents, logSecurityEvent } from '../security/security-events.js';
 import { addSenderBlock, removeSenderBlock, listSenderBlocks, addToSuppressionList, removeFromSuppressionList, listSuppressions } from '../abuse/abuse.service.js';
@@ -57,6 +59,7 @@ function getConfigResponse() {
     outboundProvider: getOutboundProvider(),
     outboundConfigured: isOutboundConfigured(),
     forwardingEnabled: isForwardingEnabled(),
+    byoSmtp: { enabled: isByoSmtpRuntimeEnabled(), kmsConfigured: isRelayKmsConfigured(), pilotOwnersConfigured: Boolean(process.env['BYO_SMTP_PILOT_OWNER_IDS']) },
     domain: { configured: Boolean(getPlatformDomain()) },
     resend: { configured: resendConfigured },
     ses: { configured: sesConfigured },
@@ -67,6 +70,9 @@ const configUpdateSchema = z.object({ resendApiKey: z.string().min(1).optional()
 adminRouter.post('/config', (req, res, next) => { try { const patch = configUpdateSchema.parse(req.body); setRuntimeConfig({ resendApiKey: patch.resendApiKey, platformDomain: patch.platformDomain, outboundProvider: patch.outboundProvider }); res.json(getConfigResponse()); } catch (e) { next(e); } });
 adminRouter.post('/forwarding/disable', async (req, res, next) => { try { setRuntimeConfig({ forwardingEnabled: false }); await writeAuditLog('forwarding.disable', 'system', 'forwarding', { via: 'admin_api' }); await logSecurityEvent({ action: 'forwarding.disable', severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret', metadata: { via: 'admin_api' } }); res.json({ forwardingEnabled: isForwardingEnabled() }); } catch (e) { next(e); } });
 adminRouter.post('/forwarding/enable', async (req, res, next) => { try { setRuntimeConfig({ forwardingEnabled: true }); await writeAuditLog('forwarding.enable', 'system', 'forwarding', { via: 'admin_api' }); await logSecurityEvent({ action: 'forwarding.enable', severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret', metadata: { via: 'admin_api' } }); res.json({ forwardingEnabled: isForwardingEnabled() }); } catch (e) { next(e); } });
+adminRouter.post('/byo-smtp/disable', async (req, res, next) => { try { setRuntimeConfig({ byoSmtpEnabled: false }); await writeAuditLog('byo_smtp.disable', 'system', 'byo_smtp', { via: 'admin_api' }); await logSecurityEvent({ action: 'byo_smtp.disable', severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret', metadata: { via: 'admin_api' } }); res.json({ byoSmtpEnabled: false }); } catch (e) { next(e); } });
+adminRouter.post('/byo-smtp/enable', async (req, res, next) => { try { if (process.env['BYO_SMTP_ENABLED'] !== 'true' || !isRelayKmsConfigured() || !process.env['BYO_SMTP_PILOT_OWNER_IDS']) return res.status(409).json({ error: 'BYO SMTP environment gates are not configured' }); setRuntimeConfig({ byoSmtpEnabled: true }); await writeAuditLog('byo_smtp.enable', 'system', 'byo_smtp', { via: 'admin_api' }); await logSecurityEvent({ action: 'byo_smtp.enable', severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret', metadata: { via: 'admin_api' } }); res.json({ byoSmtpEnabled: true }); } catch (e) { next(e); } });
+adminRouter.post('/smtp-relays/:id/suspend', async (req, res, next) => { try { await suspendSmtpRelay(String(req.params.id)); await logSecurityEvent({ action: 'smtp_relay.suspend', targetType: 'smtp_relay', targetId: String(req.params.id), severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret' }); res.status(204).send(); } catch (e) { next(e); } });
 adminRouter.get('/stats', async (_req, res, next) => { try { res.json(await getAdminStats()); } catch (e) { next(e); } });
 adminRouter.use('/tti', ttiRouter);
 adminRouter.get('/security-events', async (req, res, next) => { try { const hours = Number(req.query.hours ?? 24); const limit = Number(req.query.limit ?? 100); res.json(await listSecurityEvents(hours, limit)); } catch (e) { next(e); } });
