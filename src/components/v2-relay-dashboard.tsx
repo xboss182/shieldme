@@ -33,7 +33,6 @@ import {
   relayCheckRows,
   relayPageState,
   smtpRelayStatusLabel,
-  type SmtpRelayUiStatus,
 } from "../lib/smtp-relay-ui";
 
 type Notice = { tone: "error" | "success"; message: string; code?: string } | null;
@@ -814,7 +813,7 @@ function RelayDetail({
   onState: (action: "enable" | "disable" | "revoke") => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
-  const checks = relayCheckRows(relay.status as SmtpRelayUiStatus, relay.lastOutcomeCode);
+  const checks = relayCheckRows(relay.status, relay.lastOutcomeCode);
   const matchingAliases = aliases.filter((alias) => alias.domainId === relay.domainId);
   const ready = canAssignCustomRelay(relay.status, relay.circuitStatus);
   const retryDeadline = relay.queue.retryDeadline

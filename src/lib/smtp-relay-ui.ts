@@ -1,3 +1,5 @@
+import type { SmtpRelayStatus } from "./api";
+
 export const smtpRelayStatuses = [
   "draft",
   "credentials_unverified",
@@ -12,9 +14,9 @@ export const smtpRelayStatuses = [
   "circuit_open",
   "disabled",
   "revoked",
-] as const;
+] as const satisfies readonly SmtpRelayStatus[];
 
-export type SmtpRelayUiStatus = (typeof smtpRelayStatuses)[number];
+export type SmtpRelayUiStatus = SmtpRelayStatus;
 
 export const smtpRelayStatusLabel: Record<SmtpRelayUiStatus, string> = {
   draft: "draft",
@@ -46,7 +48,14 @@ export function relayPageState(input: {
   return input.relayCount === 0 ? "empty" : "ready";
 }
 
-export function relayCheckRows(status: SmtpRelayUiStatus, outcomeCode: string | null) {
+export function relayCheckRows(
+  status: SmtpRelayUiStatus,
+  outcomeCode: string | null,
+): Array<{
+  label: string;
+  state: "passed" | "failed" | "running" | "pending";
+  code: string | null;
+}> {
   const phase =
     status === "testing_dns"
       ? 0
