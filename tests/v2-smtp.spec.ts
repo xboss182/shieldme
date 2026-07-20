@@ -23,12 +23,16 @@ const relay = {
   updatedAt: now,
 };
 
-async function mockV2Api(page: Page) {
+async function mockV2Api(page: Page, byoSmtpDisabled = false, requestedPaths: string[] = []) {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    const relayFeatureDisabled = path === "/api/v2/smtp-relays" && byoSmtpDisabled;
+    requestedPaths.push(path);
     const response =
-      path === "/api/smtp-relays"
-        ? { relays: [relay] }
+      path === "/api/v2/smtp-relays"
+        ? relayFeatureDisabled
+          ? { error: "BYO SMTP is unavailable", code: "byo_smtp_disabled" }
+          : { relays: [relay] }
         : path === "/api/domains"
           ? {
               domains: [
@@ -71,11 +75,11 @@ async function mockV2Api(page: Page) {
                     },
                   ],
                 }
-              : path === "/api/smtp-relays/relay-1/audit-events"
+              : path === "/api/v2/smtp-relays/relay-1/audit-events"
                 ? { events: [] }
                 : { error: "Unexpected API request" };
     await route.fulfill({
-      status: "error" in response ? 404 : 200,
+      status: relayFeatureDisabled ? 403 : "error" in response ? 404 : 200,
       contentType: "application/json",
       body: JSON.stringify(response),
     });
@@ -83,8 +87,9 @@ async function mockV2Api(page: Page) {
 }
 
 test("V2 relay flow is usable at 375px without unintended SMTP calls", async ({ page }) => {
+  const requestedPaths: string[] = [];
   await page.addInitScript(() => localStorage.setItem("sm_access", "test-token"));
-  await mockV2Api(page);
+  await mockV2Api(page, false, requestedPaths);
   await page.goto("/v2", { waitUntil: "networkidle" });
 
   await expect(page.getByRole("heading", { name: "Bring your own SMTP, safely" })).toBeVisible();
@@ -93,6 +98,30 @@ test("V2 relay flow is usable at 375px without unintended SMTP calls", async ({ 
   await expect(
     page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   ).resolves.toBe(true);
+  expect(requestedPaths).toContain("/api/v2/smtp-relays");
+  expect(requestedPaths).not.toContain("/api/smtp-relays");
+});
+
+test("V2 redirects unauthenticated visitors to sign in without calling the API", async ({
+  page,
+}) => {
+  const requestedPaths: string[] = [];
+  await mockV2Api(page, false, requestedPaths);
+  await page.goto("/v2");
+
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  expect(requestedPaths).toEqual([]);
+});
+
+test("V2 represents a disabled SMTP pilot without an API failure screen", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("sm_access", "test-token"));
+  await mockV2Api(page, true);
+  await page.goto("/v2", { waitUntil: "networkidle" });
+
+  await expect(page.getByRole("heading", { name: "BYO SMTP is not enabled" })).toBeVisible();
+  await expect(page.getByText("optional feature is disabled for this account")).toBeVisible();
+  await expect(page.getByText("Could not load relay controls")).toHaveCount(0);
 });
 
 test("V2 exposes relay status and assignment acknowledgement on desktop", async ({ page }) => {

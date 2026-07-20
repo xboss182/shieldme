@@ -7,6 +7,11 @@ const dashboard = await readFile(
   new URL("../src/components/v2-relay-dashboard.tsx", import.meta.url),
   "utf8",
 );
+const api = await readFile(new URL("../src/lib/api.ts", import.meta.url), "utf8");
+const relayRoutes = await readFile(
+  new URL("../backend/alias-forwarder/src/routes/index.ts", import.meta.url),
+  "utf8",
+);
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("V2 is authenticated and upgrades remains an intentional redirect", async () => {
@@ -14,6 +19,12 @@ test("V2 is authenticated and upgrades remains an intentional redirect", async (
   assert.match(route, /createFileRoute\("\/v2"\)/);
   assert.match(route, /tokenStore\.getAccess/);
   assert.match(upgrades, /redirect\(\{ to: "\/v2", replace: true \}\)/);
+});
+
+test("V2 client and backend share the versioned relay endpoint contract", () => {
+  assert.match(api, /const smtpRelaysApiPath = "\/api\/v2\/smtp-relays"/);
+  assert.match(relayRoutes, /apiRouter\.use\('\/v2\/smtp-relays', smtpRelaysRouter\)/);
+  assert.doesNotMatch(api, /"\/api\/smtp-relays/);
 });
 
 test("V2 uses server-constrained recipients and never reuses SMTP secrets", () => {
