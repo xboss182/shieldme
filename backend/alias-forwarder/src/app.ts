@@ -6,7 +6,7 @@ import promBundle from 'express-prom-bundle';
 import { apiRouter } from './routes/index.js';
 import { apiRateLimiter, authRateLimiter } from './middleware/api-rate-limit.js';
 import { logger } from './lib/logger.js';
-const PROD_ORIGINS = ["https://app.shieldme.cc"];
+const PROD_ORIGINS = ["https://app.shieldme.cc", "https://shieldme.cc", "https://www.shieldme.cc"];
 const DEV_ORIGINS = ['http://localhost:3006', 'http://localhost:5173'];
 const ALLOWED_ORIGINS = process.env.NODE_ENV === 'production' ? PROD_ORIGINS : [...PROD_ORIGINS, ...DEV_ORIGINS];
 function corsMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
