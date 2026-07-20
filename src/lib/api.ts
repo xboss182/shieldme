@@ -458,25 +458,27 @@ export const aliasesApi = {
     ),
 };
 
+const smtpRelaysApiPath = "/api/v2/smtp-relays";
+
 export const smtpRelaysApi = {
-  list: () => apiFetch<{ relays: SmtpRelay[] }>("/api/smtp-relays"),
+  list: () => apiFetch<{ relays: SmtpRelay[] }>(smtpRelaysApiPath),
   create: (input: SmtpRelayInput) =>
-    apiFetch<{ relay: SmtpRelay }>("/api/smtp-relays", {
+    apiFetch<{ relay: SmtpRelay }>(smtpRelaysApiPath, {
       method: "POST",
       body: JSON.stringify(input),
     }),
   update: (id: string, patch: Partial<SmtpRelayInput>) =>
-    apiFetch<{ relay: SmtpRelay }>("/api/smtp-relays/" + id, {
+    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
   test: (id: string, recipientId: string) =>
-    apiFetch<{ test: SmtpRelayTest }>("/api/smtp-relays/" + id + "/test", {
+    apiFetch<{ test: SmtpRelayTest }>(`${smtpRelaysApiPath}/${id}/test`, {
       method: "POST",
       body: JSON.stringify({ recipientId }),
     }),
   confirmTest: (relayId: string, testId: string, token: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${relayId}/tests/${testId}/confirm`, {
+    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${relayId}/tests/${testId}/confirm`, {
       method: "POST",
       body: JSON.stringify({ token }),
     }),
@@ -484,19 +486,19 @@ export const smtpRelaysApi = {
     relayId: string,
     input: { username: string; password: string; recipientId: string },
   ) =>
-    apiFetch<{ test: SmtpRelayTest }>(`/api/smtp-relays/${relayId}/rotate-credentials`, {
+    apiFetch<{ test: SmtpRelayTest }>(`${smtpRelaysApiPath}/${relayId}/rotate-credentials`, {
       method: "POST",
       body: JSON.stringify(input),
     }),
   enable: (id: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${id}/enable`, { method: "POST" }),
+    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}/enable`, { method: "POST" }),
   disable: (id: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${id}/disable`, { method: "POST" }),
+    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}/disable`, { method: "POST" }),
   revoke: (id: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`/api/smtp-relays/${id}/revoke`, { method: "POST" }),
+    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}/revoke`, { method: "POST" }),
   auditEvents: (id: string) =>
-    apiFetch<{ events: SmtpRelayAuditEvent[] }>(`/api/smtp-relays/${id}/audit-events`),
-  remove: (id: string) => apiFetch<void>("/api/smtp-relays/" + id, { method: "DELETE" }),
+    apiFetch<{ events: SmtpRelayAuditEvent[] }>(`${smtpRelaysApiPath}/${id}/audit-events`),
+  remove: (id: string) => apiFetch<void>(`${smtpRelaysApiPath}/${id}`, { method: "DELETE" }),
 };
 
 export const aliasesOutboundApi = {

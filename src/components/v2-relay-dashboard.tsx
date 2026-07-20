@@ -20,6 +20,7 @@ import {
   domainsApi,
   recipientsApi,
   smtpRelaysApi,
+  tokenStore,
   type Alias,
   type Domain,
   type Recipient,
@@ -129,6 +130,7 @@ function StatePanel({
 }
 
 export function V2RelayDashboard() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [relays, setRelays] = useState<SmtpRelay[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
@@ -188,6 +190,10 @@ export function V2RelayDashboard() {
       setFeatureEnabled(true);
       setSelectedId((current) => current ?? relayData.relays[0]?.id ?? null);
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        window.location.replace("/login");
+        return;
+      }
       const nextNotice = apiNotice(error);
       setNotice(nextNotice);
       setLoadFailed(true);
@@ -198,8 +204,17 @@ export function V2RelayDashboard() {
   }
 
   useEffect(() => {
-    void refresh();
+    setAuthenticated(tokenStore.getAccess() !== null);
   }, []);
+
+  useEffect(() => {
+    if (authenticated === null) return;
+    if (!authenticated) {
+      window.location.replace("/login");
+      return;
+    }
+    void refresh();
+  }, [authenticated]);
 
   const selectedRelayId = selectedRelay?.id;
 
@@ -409,7 +424,7 @@ export function V2RelayDashboard() {
     }
   }
 
-  if (state === "loading")
+  if (authenticated === null || state === "loading")
     return (
       <StatePanel title="Loading relay controls" icon={LoaderCircle}>
         Checking your domains, verified recipients, aliases, and relay health.
