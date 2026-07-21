@@ -51,6 +51,6 @@ export function isPermanentOutboundError(error: unknown): boolean {
 
 export async function sendOutbound(payload: ForwardPayload, policy: OutboundPolicy = {}): Promise<string> {
   const provider = policy.pinnedProvider ?? getOutboundProvider();
-  logger.debug({ provider, to: payload.to }, 'Outbound send initiated');
+  logger.debug({ provider }, 'Outbound send initiated');
   return sendViaProvider(provider, payload);
 }

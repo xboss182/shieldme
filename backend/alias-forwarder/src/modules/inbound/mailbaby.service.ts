@@ -74,7 +74,7 @@ export async function sendViaMailBaby(payload: ForwardPayload): Promise<string> 
       headers: payload.headers,
     });
     const messageId = String(result.messageId ?? 'mailbaby_submitted');
-    logger.info({ provider: 'mailbaby', messageId, to: payload.to }, 'Mail delivered via MailBaby');
+    logger.info({ provider: 'mailbaby', messageId }, 'Mail delivered via MailBaby');
     return messageId;
   } catch (error) {
     throw classifyMailBabyError(error);

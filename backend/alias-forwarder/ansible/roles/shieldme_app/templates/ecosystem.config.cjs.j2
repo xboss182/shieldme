@@ -14,7 +14,7 @@ module.exports = {
       restart_delay: 5000,
       max_memory_restart: '512M',
       kill_timeout: 10000,
-      env: { NODE_ENV: 'production', PORT: '{{ shieldme_api_port }}', BYO_SMTP_ENABLED: '{{ 'true' if shieldme_relay_feature_flag | bool else 'false' }}', BYO_SMTP_PILOT_OWNER_IDS: '{{ shieldme_relay_pilot_owner_ids | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_APPROVED_HOSTS: '{{ shieldme_relay_approved_hosts | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: '25', BYO_SMTP_PILOT_CONCURRENCY: '1', RELAY_KMS_SOCKET_PATH: '{{ '/run/shieldme-relay-kms/kms.sock' if shieldme_relay_security_apply | bool else '' }}' }
+      env: { NODE_ENV: 'production', PORT: '{{ shieldme_api_port }}', OUTBOUND_PROVIDER: '{{ shieldme_outbound_provider | default("mailbaby") }}', MAILBABY_SMTP_USERNAME: '{{ shieldme_mailbaby_smtp_username | default("") }}', MAILBABY_SMTP_PASSWORD: '{{ shieldme_mailbaby_smtp_password | default("") }}', RESEND_API_KEY: '{{ shieldme_resend_api_key | default("") }}', BYO_SMTP_ENABLED: '{{ 'true' if shieldme_relay_feature_flag | bool else 'false' }}', BYO_SMTP_PILOT_OWNER_IDS: '{{ shieldme_relay_pilot_owner_ids | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_APPROVED_HOSTS: '{{ shieldme_relay_approved_hosts | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: '25', BYO_SMTP_PILOT_CONCURRENCY: '1', RELAY_KMS_SOCKET_PATH: '{{ '/run/shieldme-relay-kms/kms.sock' if shieldme_relay_security_apply | bool else '' }}' }
     },
     {
       name: '{{ pm2_apps.smtp }}',
@@ -46,7 +46,7 @@ module.exports = {
       restart_delay: 5000,
       max_memory_restart: '512M',
       kill_timeout: 10000,
-      env: { NODE_ENV: 'production', BYO_SMTP_ENABLED: '{{ 'true' if shieldme_relay_feature_flag | bool else 'false' }}', BYO_SMTP_PILOT_OWNER_IDS: '{{ shieldme_relay_pilot_owner_ids | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_APPROVED_HOSTS: '{{ shieldme_relay_approved_hosts | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: '25', BYO_SMTP_PILOT_CONCURRENCY: '1', RELAY_KMS_SOCKET_PATH: '{{ '/run/shieldme-relay-kms/kms.sock' if shieldme_relay_security_apply | bool else '' }}', RELAY_METRICS_PORT: '{{ shieldme_relay_metrics_port if shieldme_relay_security_apply | bool else '' }}' }
+      env: { NODE_ENV: 'production', OUTBOUND_PROVIDER: '{{ shieldme_outbound_provider | default("mailbaby") }}', MAILBABY_SMTP_USERNAME: '{{ shieldme_mailbaby_smtp_username | default("") }}', MAILBABY_SMTP_PASSWORD: '{{ shieldme_mailbaby_smtp_password | default("") }}', RESEND_API_KEY: '{{ shieldme_resend_api_key | default("") }}', BYO_SMTP_ENABLED: '{{ 'true' if shieldme_relay_feature_flag | bool else 'false' }}', BYO_SMTP_PILOT_OWNER_IDS: '{{ shieldme_relay_pilot_owner_ids | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_APPROVED_HOSTS: '{{ shieldme_relay_approved_hosts | join(',') if shieldme_relay_feature_flag | bool else '' }}', BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: '25', BYO_SMTP_PILOT_CONCURRENCY: '1', RELAY_KMS_SOCKET_PATH: '{{ '/run/shieldme-relay-kms/kms.sock' if shieldme_relay_security_apply | bool else '' }}', RELAY_METRICS_PORT: '{{ shieldme_relay_metrics_port if shieldme_relay_security_apply | bool else '' }}' }
     },
     {
       name: '{{ pm2_apps.site }}',
