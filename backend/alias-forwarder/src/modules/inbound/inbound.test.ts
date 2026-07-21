@@ -55,6 +55,7 @@ vi.mock('../../config/env.js', () => ({
 vi.mock('../../config/runtime-config.js', () => ({
   getPlatformDomain: () => 'mail.platform.com',
   getResendApiKey: () => undefined,
+  getOutboundProvider: () => 'mailbaby',
   setRuntimeConfig: vi.fn(),
   getRuntimeConfig: () => ({}),
   isForwardingEnabled: () => true,

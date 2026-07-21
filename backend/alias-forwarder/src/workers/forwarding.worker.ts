@@ -7,7 +7,7 @@ import { db } from '../db/client.js';
 import { aliases, mailLogs } from '../db/schema.js';
 import { getPlatformDomain, isForwardingEnabled, getOutboundProvider, isOutboundConfigured } from '../config/runtime-config.js';
 import { logger } from '../lib/logger.js';
-import { sendOutbound } from '../modules/inbound/outbound.service.js';
+import { isPermanentOutboundError, sendOutbound } from '../modules/inbound/outbound.service.js';
 import { emailForwardingQueueName, type EmailForwardingJob, type EmailForwardingPayload } from '../queues/email-jobs.js';
 import { decryptQueuePayload } from '../queues/secure-email-jobs.js';
 import { buildForwardBanner, buildForwardBannerText } from '../lib/forward-banner.js';
@@ -63,10 +63,34 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
 
   logger.info({ jobId: job.id, logId, aliasId }, 'Processing forwarding job');
 
-  if (payload.routeMode !== 'custom_smtp' && !isOutboundConfigured()) {
-    logger.warn({ jobId: job.id, logId }, 'Outbound provider not configured — forwarding skipped');
-    await db.update(mailLogs).set({ status: 'failed', rejectionReason: 'outbound_not_configured', updatedAt: new Date() }).where(eq(mailLogs.id, logId));
-    return;
+  const customSmtp = payload.routeMode === 'custom_smtp';
+  const effectiveProvider = payload.outboundProvider;
+
+  if (!customSmtp) {
+    if (!effectiveProvider) {
+      logger.warn({ jobId: job.id, logId }, 'Legacy unpinned forwarding job rejected — missing outbound provider');
+      await db.update(mailLogs).set({
+        status: 'failed',
+        failureType: 'permanent',
+        failureReason: 'unpinned_legacy_job_rejected',
+        rejectionReason: 'unpinned_legacy_job_rejected',
+        updatedAt: new Date(),
+      }).where(eq(mailLogs.id, logId));
+      return;
+    }
+
+    if (!isOutboundConfigured(effectiveProvider)) {
+      logger.warn({ jobId: job.id, logId, provider: effectiveProvider }, 'Pinned outbound provider not configured — forwarding skipped');
+      await db.update(mailLogs).set({
+        status: 'failed',
+        outboundProvider: effectiveProvider,
+        failureType: 'permanent',
+        failureReason: 'outbound_not_configured',
+        rejectionReason: 'outbound_not_configured',
+        updatedAt: new Date(),
+      }).where(eq(mailLogs.id, logId));
+      return;
+    }
   }
 
   // ── Global kill-switch check ────────────────────────────────────────────
@@ -222,7 +246,6 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
-  const customSmtp = payload.routeMode === 'custom_smtp';
   if (customSmtp && job.attemptsMade > 0) relayRetriesTotal.inc();
   if (customSmtp && log.createdAt instanceof Date) relayQueueWaitSeconds.observe(Math.max(0, (Date.now() - log.createdAt.getTime()) / 1_000));
   let outboundMessageId: string;
@@ -261,19 +284,19 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         textBody,
         htmlBody,
         headers,
-      }, { pgpRequired: pgpMode === 'required', pgpEncrypted });
+      }, { pgpRequired: pgpMode === 'required', pgpEncrypted, pinnedProvider: effectiveProvider });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'outbound_send_failed';
     const customRouteUnavailable = /custom_smtp_route_snapshot_missing|relay_unavailable|credential_version_unavailable|BYO SMTP is unavailable|Relay credentials are unavailable/.test(message);
-    const permanent = customRouteUnavailable || /invalid|suppressed|blocked|complaint|bounce|permanent|5\d\d|auth|tls|certificate|dns|unsafe/.test(message);
+    const permanent = customRouteUnavailable || isPermanentOutboundError(err) || /invalid|suppressed|blocked|complaint|bounce|permanent|5\d\d|auth|tls|certificate|dns|unsafe/.test(message);
     const exhausted = job.attemptsMade + 1 >= 3;
     const failureCode = customSmtp ? customSmtpFailureCode(err) : message.slice(0, 80);
     if (customSmtp) relayFailuresTotal.inc({ phase: failureCode.replace('custom_smtp_', '').replace('_failure', '') });
     if (customSmtp && payload.relayId && !customRouteUnavailable) await recordCustomSmtpFailure(payload.relayId, failureCode);
     await db.update(mailLogs).set({
       status: permanent || exhausted ? 'failed' : 'queued',
-      outboundProvider: customSmtp ? 'custom_smtp' : getOutboundProvider(),
+      outboundProvider: customSmtp ? 'custom_smtp' : effectiveProvider,
       failureType: permanent || exhausted ? 'permanent' : 'transient',
       failureReason: customSmtp ? failureCode : message.slice(0, 500),
       rejectionReason: customSmtp ? failureCode : message.slice(0, 500),
@@ -286,7 +309,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
     throw err;
   }
 
-  await db.update(mailLogs).set({ status: 'delivered', resendMessageId: customSmtp ? null : outboundMessageId, providerMessageId: outboundMessageId, outboundProvider: customSmtp ? 'custom_smtp' : getOutboundProvider(), smtpResponseClass: customSmtp ? '2xx' : null, attemptCount: job.attemptsMade + 1, trackingProtection: trackingProtection.metadata, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
+  await db.update(mailLogs).set({ status: 'delivered', resendMessageId: customSmtp ? null : outboundMessageId, providerMessageId: outboundMessageId, outboundProvider: customSmtp ? 'custom_smtp' : effectiveProvider, smtpResponseClass: customSmtp ? '2xx' : null, attemptCount: job.attemptsMade + 1, trackingProtection: trackingProtection.metadata, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
   const ttiProbeToken = subject.match(/\[shieldme-tti:([a-zA-Z0-9_-]{8,128})\]/)?.[1];
   if (ttiProbeToken) {
     await recordTtiForwarded({

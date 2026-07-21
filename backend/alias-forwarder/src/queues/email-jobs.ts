@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import { redis } from '../lib/redis.js';
 import { env } from '../config/env.js';
 import { encryptQueuePayload, type QueuePayloadTtlMetadata } from './secure-email-jobs.js';
+import type { OutboundProvider } from '../modules/inbound/outbound.service.js';
 
 export const emailForwardingQueueName = 'email-forwarding';
 
@@ -9,6 +10,7 @@ export type EmailForwardingPayload = {
   aliasId: string;
   messageId: string;
   routeMode?: 'platform' | 'custom_smtp';
+  outboundProvider?: OutboundProvider;
   relayId?: string;
   credentialVersion?: number;
   halfOpenProbe?: boolean;

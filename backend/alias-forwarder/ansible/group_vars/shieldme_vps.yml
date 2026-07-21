@@ -29,8 +29,9 @@ shieldme_env_template:
   PLATFORM_DOMAIN: shieldme.cc
   DATABASE_URL: postgresql://USER:REDACTED@127.0.0.1:5432/DBNAME
   REDIS_URL: redis://127.0.0.1:6379
-  OUTBOUND_PROVIDER: resend
-  OUTBOUND_FALLBACK_PROVIDER: none
+  OUTBOUND_PROVIDER: mailbaby
+  MAILBABY_SMTP_USERNAME: REPLACE_WITH_VAULTED_SECRET
+  MAILBABY_SMTP_PASSWORD: REPLACE_WITH_VAULTED_SECRET
   RESEND_API_KEY: REPLACE_WITH_VAULTED_SECRET
   JWT_ACCESS_SECRET: REPLACE_WITH_VAULTED_SECRET_AT_LEAST_32_CHARS
   JWT_REFRESH_SECRET: REPLACE_WITH_VAULTED_SECRET_AT_LEAST_32_CHARS
@@ -45,6 +46,10 @@ shieldme_env_template:
   BYO_SMTP_PILOT_CONCURRENCY: "1"
   RELAY_KMS_SOCKET_PATH: /run/shieldme-relay-kms/kms.sock
   RELAY_METRICS_PORT: "9405"
+shieldme_outbound_provider: mailbaby
+shieldme_mailbaby_smtp_username: REPLACE_WITH_VAULTED_SECRET
+shieldme_mailbaby_smtp_password: REPLACE_WITH_VAULTED_SECRET
+shieldme_resend_api_key: REPLACE_WITH_VAULTED_SECRET
 shieldme_relay_security_apply: false
 shieldme_relay_feature_flag: false
 shieldme_relay_kms_active_key_id: v1

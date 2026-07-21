@@ -51,6 +51,6 @@ export async function sendViaResend(payload: ForwardPayload): Promise<string> {
     throw new Error(`Resend error: ${error?.message ?? 'unknown'}`);
   }
 
-  logger.info({ resendMessageId: data.id, to: payload.to }, 'Mail delivered via Resend');
+  logger.info({ resendMessageId: data.id }, 'Mail delivered via Resend');
   return data.id;
 }

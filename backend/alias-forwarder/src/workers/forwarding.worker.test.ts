@@ -166,6 +166,7 @@ function makeJob(overrides = {}) {
       subject: 'Test subject',
       textBody: 'Hello world',
       htmlBody: '<p>Hello world</p>',
+      outboundProvider: 'mailbaby',
       ...overrides,
     },
   };
@@ -176,27 +177,50 @@ describe('forwarding worker — outbound provider', () => {
     vi.resetAllMocks();
     mockBuildForwardBanner.mockReturnValue('<banner/>');
     mockBuildForwardBannerText.mockReturnValue('[banner] ');
-    mockIsOutboundConfigured.mockReturnValue(true);
+    mockIsOutboundConfigured.mockImplementation((provider) => provider === 'resend' || provider === 'mailbaby');
     mockSendOutbound.mockResolvedValue('outbound-msg-id');
     mockGetPlatformDomain.mockReturnValue('shieldme.cc');
     mockIsForwardingEnabled.mockReturnValue(true);
-    mockGetOutboundProvider.mockReturnValue('resend');
+    mockGetOutboundProvider.mockReturnValue('mailbaby');
     mockAssertMonthlyForwardAllowed.mockClear();
     mockAssertOutboundProviderAllowed.mockClear();
     mockDecryptQueuePayload.mockImplementation((data) => data);
     makeUpdateChain();
   });
 
-  it('skips forwarding and marks failed when outbound not configured', async () => {
-    mockIsOutboundConfigured.mockReturnValue(false);
+  it('skips forwarding and marks failed when pinned outbound provider is not configured', async () => {
+    mockIsOutboundConfigured.mockImplementation((provider) => provider === 'resend');
     const { setFn } = makeUpdateChain();
 
     const processor = getProcessor();
-    await processor(makeJob());
+    await processor(makeJob({ outboundProvider: 'mailbaby' }));
 
     expect(mockSendOutbound).not.toHaveBeenCalled();
     expect(setFn).toHaveBeenCalledWith(
-      expect.objectContaining({ status: 'failed', rejectionReason: 'outbound_not_configured' }),
+      expect.objectContaining({
+        status: 'failed',
+        outboundProvider: 'mailbaby',
+        failureType: 'permanent',
+        failureReason: 'outbound_not_configured',
+        rejectionReason: 'outbound_not_configured',
+      }),
+    );
+  });
+
+  it('fails closed when legacy queue payload is unpinned', async () => {
+    const { setFn } = makeUpdateChain();
+
+    const processor = getProcessor();
+    await processor(makeJob({ outboundProvider: null }));
+
+    expect(mockSendOutbound).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        failureType: 'permanent',
+        failureReason: 'unpinned_legacy_job_rejected',
+        rejectionReason: 'unpinned_legacy_job_rejected',
+      }),
     );
   });
 
@@ -206,9 +230,26 @@ describe('forwarding worker — outbound provider', () => {
     makeUpdateChain();
 
     const processor = getProcessor();
-    await processor(makeJob());
+    await processor(makeJob({ outboundProvider: 'mailbaby' }));
 
     expect(mockSendOutbound).toHaveBeenCalledOnce();
+    const policyCall = mockSendOutbound.mock.calls[0][1];
+    expect(policyCall.pinnedProvider).toBe('mailbaby');
+  });
+
+  it('proceeds with Resend-pinned retry when global config is MailBaby but MailBaby is unconfigured and Resend is configured', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    makeUpdateChain();
+    mockGetOutboundProvider.mockReturnValue('mailbaby');
+    mockIsOutboundConfigured.mockImplementation((provider) => provider === 'resend');
+
+    const processor = getProcessor();
+    await processor(makeJob({ outboundProvider: 'resend' }));
+
+    expect(mockSendOutbound).toHaveBeenCalledOnce();
+    const policyCall = mockSendOutbound.mock.calls[0][1];
+    expect(policyCall.pinnedProvider).toBe('resend');
   });
 
   it('adds spam headers and tags subject for suspicious mail', async () => {
@@ -283,7 +324,7 @@ describe('forwarding worker — pgpMode enforcement', () => {
     mockSendOutbound.mockResolvedValue('outbound-msg-id');
     mockGetPlatformDomain.mockReturnValue('shieldme.cc');
     mockIsForwardingEnabled.mockReturnValue(true);
-    mockGetOutboundProvider.mockReturnValue('resend');
+    mockGetOutboundProvider.mockReturnValue('mailbaby');
     mockAssertMonthlyForwardAllowed.mockClear();
     mockAssertOutboundProviderAllowed.mockClear();
     mockDecryptQueuePayload.mockImplementation((data) => data);

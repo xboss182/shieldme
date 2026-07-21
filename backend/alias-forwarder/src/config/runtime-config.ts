@@ -11,7 +11,8 @@ import { isRelayKmsConfigured } from '../modules/smtp-relays/crypto.js';
  * SMTP, worker) see the same launch-safety state.
  */
 
-export type OutboundProvider = 'resend' | 'ses';
+/** Active selectable outbound providers. SES removed from all active paths. */
+export type OutboundProvider = 'mailbaby' | 'resend';
 
 interface RuntimeConfig {
   resendApiKey?: string;
@@ -20,7 +21,7 @@ interface RuntimeConfig {
   forwardingEnabled: boolean;
   /** Global BYO SMTP kill-switch. False by default and persisted separately. */
   byoSmtpEnabled: boolean;
-  /** Which outbound email provider to use. Defaults to 'resend'. */
+  /** Which outbound email provider to use. Defaults to 'mailbaby'. */
   outboundProvider?: OutboundProvider;
 }
 
@@ -43,7 +44,7 @@ function loadRuntimeConfig(): RuntimeConfig {
       platformDomain: typeof parsed.platformDomain === 'string' ? parsed.platformDomain : undefined,
       forwardingEnabled: typeof parsed.forwardingEnabled === 'boolean' ? parsed.forwardingEnabled : true,
       byoSmtpEnabled: typeof parsed.byoSmtpEnabled === 'boolean' ? parsed.byoSmtpEnabled : false,
-      outboundProvider: parsed.outboundProvider === 'ses' ? 'ses' : parsed.outboundProvider === 'resend' ? 'resend' : undefined,
+      outboundProvider: parsed.outboundProvider === 'resend' ? 'resend' : parsed.outboundProvider === 'mailbaby' ? 'mailbaby' : undefined,
     };
   } catch {
     return { forwardingEnabled: true, byoSmtpEnabled: false };
@@ -109,23 +110,20 @@ export function isApprovedRelayHost(host: string): boolean {
   return (process.env['BYO_SMTP_APPROVED_HOSTS'] ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean).includes(host.toLowerCase());
 }
 
-/** Which outbound provider is active: runtime override > env var > default 'resend' */
+/** Which outbound provider is active: runtime override > env var > default 'mailbaby' */
 export function getOutboundProvider(): OutboundProvider {
   const stored = refreshRuntimeConfig().outboundProvider;
   if (stored) return stored;
   const env = process.env['OUTBOUND_PROVIDER'];
-  if (env === 'ses' || env === 'resend') return env;
-  return 'resend';
+  if (env === 'resend' || env === 'mailbaby') return env;
+  return 'mailbaby';
 }
 
 /** Is the active outbound provider fully configured? */
-export function isOutboundConfigured(): boolean {
-  const provider = getOutboundProvider();
-  if (provider === 'ses') {
-    return Boolean(
-      (process.env['AWS_ACCESS_KEY_ID'] || process.env['AWS_PROFILE']) &&
-      process.env['AWS_REGION'],
-    );
+export function isOutboundConfigured(explicitProvider?: OutboundProvider): boolean {
+  const provider = explicitProvider ?? getOutboundProvider();
+  if (provider === 'mailbaby') {
+    return Boolean(process.env['MAILBABY_SMTP_USERNAME'] && process.env['MAILBABY_SMTP_PASSWORD']);
   }
   // resend
   return Boolean(getResendApiKey());

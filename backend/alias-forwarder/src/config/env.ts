@@ -30,15 +30,10 @@ const envSchema = z.object({
   RATE_LIMIT_USER_WINDOW_SEC: z.coerce.number().int().min(1).default(3600),
   // Secret for Resend webhook signature verification (optional for MVP)
   RESEND_WEBHOOK_SECRET: z.string().optional(),
-  // Outbound provider: 'resend' (default) or 'ses'
-  OUTBOUND_PROVIDER: z.enum(['resend', 'ses']).default('resend'),
-  // Optional fallback provider. Fallback is attempted only after primary send failure.
-  // PGP-required aliases may fallback only after successful OpenPGP encryption.
-  OUTBOUND_FALLBACK_PROVIDER: z.enum(['none', 'resend', 'ses']).default('none'),
-  // AWS SES credentials (required when OUTBOUND_PROVIDER=ses)
-  AWS_REGION: z.string().optional(),
-  AWS_ACCESS_KEY_ID: z.string().optional(),
-  AWS_SECRET_ACCESS_KEY: z.string().optional(),
+  // Outbound provider: 'mailbaby' (default) or 'resend'. SES removed from active paths.
+  OUTBOUND_PROVIDER: z.enum(['mailbaby', 'resend']).default('mailbaby'),
+  MAILBABY_SMTP_USERNAME: z.string().optional(),
+  MAILBABY_SMTP_PASSWORD: z.string().optional(),
   // Admin API secret key (Bearer token for /api/admin endpoints)
   ADMIN_SECRET: z.string().min(32).optional(),
   // Inbound Spam Scanner controls. Defaults are conservative: tag only.
