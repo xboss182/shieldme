@@ -1,10 +1,10 @@
 import { sendViaResend, isResendConfigured } from './resend.service.js';
-import { sendViaSes, isSesConfigured } from './ses.service.js';
 import { sendViaMailBaby, isMailBabyConfigured, MailBabyError } from './mailbaby.service.js';
 import { logger } from '../../lib/logger.js';
 import type { ForwardPayload } from './resend.service.js';
 
-export type OutboundProvider = 'mailbaby' | 'resend' | 'ses';
+/** Active selectable outbound providers. SES has been removed from all active paths. */
+export type OutboundProvider = 'mailbaby' | 'resend';
 export type { ForwardPayload };
 
 export type OutboundPolicy = {
@@ -18,13 +18,12 @@ export type OutboundPolicy = {
 
 export function getOutboundProvider(): OutboundProvider {
   const raw = process.env['OUTBOUND_PROVIDER']?.toLowerCase().trim();
-  if (raw === 'resend' || raw === 'ses') return raw;
+  if (raw === 'resend') return raw;
   return 'mailbaby';
 }
 
 function isProviderConfigured(provider: OutboundProvider): boolean {
   if (provider === 'mailbaby') return isMailBabyConfigured();
-  if (provider === 'ses') return isSesConfigured();
   return isResendConfigured();
 }
 
@@ -34,12 +33,6 @@ async function sendViaProvider(provider: OutboundProvider, payload: ForwardPaylo
       throw new Error('MailBaby selected but MAILBABY_SMTP_USERNAME or MAILBABY_SMTP_PASSWORD is not configured');
     }
     return sendViaMailBaby(payload);
-  }
-  if (provider === 'ses') {
-    if (!isSesConfigured()) {
-      throw new Error('SES selected via OUTBOUND_PROVIDER=ses but AWS credentials are not configured');
-    }
-    return sendViaSes(payload);
   }
   if (!isResendConfigured()) {
     throw new Error('Resend selected but RESEND_API_KEY is not configured');

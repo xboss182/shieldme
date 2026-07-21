@@ -1,12 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // hoisted mocks — must be first
-const { mockSendViaResend, mockIsResendConfigured, mockSendViaSes, mockIsSesConfigured, mockSendViaMailBaby, mockIsMailBabyConfigured } =
+const { mockSendViaResend, mockIsResendConfigured, mockSendViaMailBaby, mockIsMailBabyConfigured } =
   vi.hoisted(() => ({
     mockSendViaResend: vi.fn(),
     mockIsResendConfigured: vi.fn(),
-    mockSendViaSes: vi.fn(),
-    mockIsSesConfigured: vi.fn(),
     mockSendViaMailBaby: vi.fn(),
     mockIsMailBabyConfigured: vi.fn(),
   }));
@@ -19,11 +17,6 @@ vi.mock('../../lib/logger.js', () => ({
 vi.mock('./resend.service.js', () => ({
   sendViaResend: mockSendViaResend,
   isResendConfigured: mockIsResendConfigured,
-}));
-
-vi.mock('./ses.service.js', () => ({
-  sendViaSes: mockSendViaSes,
-  isSesConfigured: mockIsSesConfigured,
 }));
 
 vi.mock('./mailbaby.service.js', () => ({
@@ -59,9 +52,14 @@ describe('getOutboundProvider', () => {
     expect(getOutboundProvider()).toBe('resend');
   });
 
-  it('returns ses when OUTBOUND_PROVIDER=ses', () => {
+  it('returns mailbaby (default) when OUTBOUND_PROVIDER=ses (SES no longer active)', () => {
     process.env['OUTBOUND_PROVIDER'] = 'ses';
-    expect(getOutboundProvider()).toBe('ses');
+    expect(getOutboundProvider()).toBe('mailbaby');
+  });
+
+  it('returns mailbaby (default) when OUTBOUND_PROVIDER is an unknown value', () => {
+    process.env['OUTBOUND_PROVIDER'] = 'unknown_provider';
+    expect(getOutboundProvider()).toBe('mailbaby');
   });
 });
 
@@ -80,13 +78,6 @@ describe('isOutboundConfigured', () => {
     mockIsResendConfigured.mockReturnValue(true);
     expect(isOutboundConfigured()).toBe(true);
     expect(mockIsResendConfigured).toHaveBeenCalled();
-  });
-
-  it('delegates to isSesConfigured when provider=ses', () => {
-    process.env['OUTBOUND_PROVIDER'] = 'ses';
-    mockIsSesConfigured.mockReturnValue(false);
-    expect(isOutboundConfigured()).toBe(false);
-    expect(mockIsSesConfigured).toHaveBeenCalled();
   });
 });
 
