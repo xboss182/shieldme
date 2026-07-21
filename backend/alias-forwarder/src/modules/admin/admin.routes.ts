@@ -51,22 +51,25 @@ adminRouter.use((req, res, next) => {
 });
 function getConfigResponse() {
   const resendConfigured = Boolean(getResendApiKey());
+  const mailbabyConfigured = Boolean(process.env['MAILBABY_SMTP_USERNAME'] && process.env['MAILBABY_SMTP_PASSWORD']);
   const sesConfigured = Boolean((process.env['AWS_ACCESS_KEY_ID'] || process.env['AWS_PROFILE']) && process.env['AWS_REGION']);
   return {
     platformDomain: getPlatformDomain() ?? null,
     resendConfigured,
+    mailbabyConfigured,
     sesConfigured,
     outboundProvider: getOutboundProvider(),
     outboundConfigured: isOutboundConfigured(),
     forwardingEnabled: isForwardingEnabled(),
     byoSmtp: { enabled: isByoSmtpRuntimeEnabled(), kmsConfigured: isRelayKmsConfigured(), pilotOwnersConfigured: Boolean(process.env['BYO_SMTP_PILOT_OWNER_IDS']) },
     domain: { configured: Boolean(getPlatformDomain()) },
+    mailbaby: { configured: mailbabyConfigured },
     resend: { configured: resendConfigured },
     ses: { configured: sesConfigured },
   };
 }
 adminRouter.get('/config', (_req, res) => res.json(getConfigResponse()));
-const configUpdateSchema = z.object({ resendApiKey: z.string().min(1).optional(), platformDomain: z.string().min(1).optional(), outboundProvider: z.enum(['resend', 'ses']).optional() });
+const configUpdateSchema = z.object({ resendApiKey: z.string().min(1).optional(), platformDomain: z.string().min(1).optional(), outboundProvider: z.enum(['mailbaby', 'resend', 'ses']).optional() });
 adminRouter.post('/config', (req, res, next) => { try { const patch = configUpdateSchema.parse(req.body); setRuntimeConfig({ resendApiKey: patch.resendApiKey, platformDomain: patch.platformDomain, outboundProvider: patch.outboundProvider }); res.json(getConfigResponse()); } catch (e) { next(e); } });
 adminRouter.post('/forwarding/disable', async (req, res, next) => { try { setRuntimeConfig({ forwardingEnabled: false }); await writeAuditLog('forwarding.disable', 'system', 'forwarding', { via: 'admin_api' }); await logSecurityEvent({ action: 'forwarding.disable', severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret', metadata: { via: 'admin_api' } }); res.json({ forwardingEnabled: isForwardingEnabled() }); } catch (e) { next(e); } });
 adminRouter.post('/forwarding/enable', async (req, res, next) => { try { setRuntimeConfig({ forwardingEnabled: true }); await writeAuditLog('forwarding.enable', 'system', 'forwarding', { via: 'admin_api' }); await logSecurityEvent({ action: 'forwarding.enable', severity: 'critical', actorType: 'admin', actorId: req.auth?.userId ?? 'admin-secret', metadata: { via: 'admin_api' } }); res.json({ forwardingEnabled: isForwardingEnabled() }); } catch (e) { next(e); } });

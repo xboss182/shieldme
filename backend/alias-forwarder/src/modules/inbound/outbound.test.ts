@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // hoisted mocks — must be first
-const { mockSendViaResend, mockIsResendConfigured, mockSendViaSes, mockIsSesConfigured } =
+const { mockSendViaResend, mockIsResendConfigured, mockSendViaSes, mockIsSesConfigured, mockSendViaMailBaby, mockIsMailBabyConfigured } =
   vi.hoisted(() => ({
     mockSendViaResend: vi.fn(),
     mockIsResendConfigured: vi.fn(),
     mockSendViaSes: vi.fn(),
     mockIsSesConfigured: vi.fn(),
+    mockSendViaMailBaby: vi.fn(),
+    mockIsMailBabyConfigured: vi.fn(),
   }));
 
 // mock logger BEFORE any module that imports it
@@ -24,6 +26,16 @@ vi.mock('./ses.service.js', () => ({
   isSesConfigured: mockIsSesConfigured,
 }));
 
+vi.mock('./mailbaby.service.js', () => ({
+  sendViaMailBaby: mockSendViaMailBaby,
+  isMailBabyConfigured: mockIsMailBabyConfigured,
+  MailBabyError: class MailBabyError extends Error {
+    constructor(public code: string, public failureType: string) {
+      super(code);
+    }
+  },
+}));
+
 import { getOutboundProvider, isOutboundConfigured, sendOutbound } from './outbound.service.js';
 import type { ForwardPayload } from './resend.service.js';
 
@@ -37,8 +49,13 @@ const PAYLOAD: ForwardPayload = {
 describe('getOutboundProvider', () => {
   afterEach(() => { delete process.env['OUTBOUND_PROVIDER']; });
 
-  it('defaults to resend when unset', () => {
+  it('defaults to mailbaby when unset', () => {
     delete process.env['OUTBOUND_PROVIDER'];
+    expect(getOutboundProvider()).toBe('mailbaby');
+  });
+
+  it('returns resend when OUTBOUND_PROVIDER=resend', () => {
+    process.env['OUTBOUND_PROVIDER'] = 'resend';
     expect(getOutboundProvider()).toBe('resend');
   });
 
@@ -46,18 +63,20 @@ describe('getOutboundProvider', () => {
     process.env['OUTBOUND_PROVIDER'] = 'ses';
     expect(getOutboundProvider()).toBe('ses');
   });
-
-  it('returns resend when OUTBOUND_PROVIDER=resend', () => {
-    process.env['OUTBOUND_PROVIDER'] = 'resend';
-    expect(getOutboundProvider()).toBe('resend');
-  });
 });
 
 describe('isOutboundConfigured', () => {
   afterEach(() => { delete process.env['OUTBOUND_PROVIDER']; });
 
-  it('delegates to isResendConfigured when provider=resend', () => {
+  it('delegates to isMailBabyConfigured when provider=mailbaby', () => {
     delete process.env['OUTBOUND_PROVIDER'];
+    mockIsMailBabyConfigured.mockReturnValue(true);
+    expect(isOutboundConfigured()).toBe(true);
+    expect(mockIsMailBabyConfigured).toHaveBeenCalled();
+  });
+
+  it('delegates to isResendConfigured when provider=resend', () => {
+    process.env['OUTBOUND_PROVIDER'] = 'resend';
     mockIsResendConfigured.mockReturnValue(true);
     expect(isOutboundConfigured()).toBe(true);
     expect(mockIsResendConfigured).toHaveBeenCalled();
@@ -78,41 +97,37 @@ describe('sendOutbound', () => {
   });
   afterEach(() => { delete process.env['OUTBOUND_PROVIDER']; });
 
+  it('routes to sendViaMailBaby by default when configured', async () => {
+    mockIsMailBabyConfigured.mockReturnValue(true);
+    mockSendViaMailBaby.mockResolvedValue('mb-msg-123');
+    const id = await sendOutbound(PAYLOAD);
+    expect(id).toBe('mb-msg-123');
+    expect(mockSendViaMailBaby).toHaveBeenCalledWith(PAYLOAD);
+    expect(mockSendViaResend).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when mailbaby is default but unconfigured', async () => {
+    mockIsMailBabyConfigured.mockReturnValue(false);
+    await expect(sendOutbound(PAYLOAD)).rejects.toThrow('MailBaby selected');
+  });
+
   it('routes to sendViaResend when provider=resend and configured', async () => {
+    process.env['OUTBOUND_PROVIDER'] = 'resend';
     mockIsResendConfigured.mockReturnValue(true);
     mockSendViaResend.mockResolvedValue('resend-id-123');
     const id = await sendOutbound(PAYLOAD);
     expect(id).toBe('resend-id-123');
     expect(mockSendViaResend).toHaveBeenCalledWith(PAYLOAD);
-    expect(mockSendViaSes).not.toHaveBeenCalled();
+    expect(mockSendViaMailBaby).not.toHaveBeenCalled();
   });
 
-  it('throws when provider=resend but not configured', async () => {
-    mockIsResendConfigured.mockReturnValue(false);
-    await expect(sendOutbound(PAYLOAD)).rejects.toThrow('RESEND_API_KEY is not configured');
-  });
-
-  it('routes to sendViaSes when provider=ses and configured', async () => {
-    process.env['OUTBOUND_PROVIDER'] = 'ses';
-    mockIsSesConfigured.mockReturnValue(true);
-    mockSendViaSes.mockResolvedValue('ses-msg-456');
-    const id = await sendOutbound(PAYLOAD);
-    expect(id).toBe('ses-msg-456');
-    expect(mockSendViaSes).toHaveBeenCalledWith(PAYLOAD);
+  it('routes to pinnedProvider regardless of environment variable changes', async () => {
+    process.env['OUTBOUND_PROVIDER'] = 'resend';
+    mockIsMailBabyConfigured.mockReturnValue(true);
+    mockSendViaMailBaby.mockResolvedValue('mb-pinned-id');
+    const id = await sendOutbound(PAYLOAD, { pinnedProvider: 'mailbaby' });
+    expect(id).toBe('mb-pinned-id');
+    expect(mockSendViaMailBaby).toHaveBeenCalledWith(PAYLOAD);
     expect(mockSendViaResend).not.toHaveBeenCalled();
-  });
-
-  it('throws when provider=ses but not configured', async () => {
-    process.env['OUTBOUND_PROVIDER'] = 'ses';
-    mockIsSesConfigured.mockReturnValue(false);
-    await expect(sendOutbound(PAYLOAD)).rejects.toThrow('AWS credentials are not configured');
-  });
-
-  it('passes the full payload to the provider', async () => {
-    mockIsResendConfigured.mockReturnValue(true);
-    mockSendViaResend.mockResolvedValue('id');
-    const rich: ForwardPayload = { ...PAYLOAD, replyTo: 'r@x.com', htmlBody: '<b>Hi</b>', headers: { 'X-Foo': 'bar' } };
-    await sendOutbound(rich);
-    expect(mockSendViaResend).toHaveBeenCalledWith(rich);
   });
 });

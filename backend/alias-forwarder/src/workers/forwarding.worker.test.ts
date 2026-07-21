@@ -180,7 +180,7 @@ describe('forwarding worker — outbound provider', () => {
     mockSendOutbound.mockResolvedValue('outbound-msg-id');
     mockGetPlatformDomain.mockReturnValue('shieldme.cc');
     mockIsForwardingEnabled.mockReturnValue(true);
-    mockGetOutboundProvider.mockReturnValue('resend');
+    mockGetOutboundProvider.mockReturnValue('mailbaby');
     mockAssertMonthlyForwardAllowed.mockClear();
     mockAssertOutboundProviderAllowed.mockClear();
     mockDecryptQueuePayload.mockImplementation((data) => data);
@@ -209,6 +209,22 @@ describe('forwarding worker — outbound provider', () => {
     await processor(makeJob());
 
     expect(mockSendOutbound).toHaveBeenCalledOnce();
+    const policyCall = mockSendOutbound.mock.calls[0][1];
+    expect(policyCall.pinnedProvider).toBe('mailbaby');
+  });
+
+  it('preserves pinned queue provider on retries', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    makeUpdateChain();
+    mockGetOutboundProvider.mockReturnValue('mailbaby');
+
+    const processor = getProcessor();
+    await processor(makeJob({ outboundProvider: 'resend' }));
+
+    expect(mockSendOutbound).toHaveBeenCalledOnce();
+    const policyCall = mockSendOutbound.mock.calls[0][1];
+    expect(policyCall.pinnedProvider).toBe('resend');
   });
 
   it('adds spam headers and tags subject for suspicious mail', async () => {
@@ -283,7 +299,7 @@ describe('forwarding worker — pgpMode enforcement', () => {
     mockSendOutbound.mockResolvedValue('outbound-msg-id');
     mockGetPlatformDomain.mockReturnValue('shieldme.cc');
     mockIsForwardingEnabled.mockReturnValue(true);
-    mockGetOutboundProvider.mockReturnValue('resend');
+    mockGetOutboundProvider.mockReturnValue('mailbaby');
     mockAssertMonthlyForwardAllowed.mockClear();
     mockAssertOutboundProviderAllowed.mockClear();
     mockDecryptQueuePayload.mockImplementation((data) => data);

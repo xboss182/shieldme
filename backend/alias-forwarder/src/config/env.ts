@@ -31,10 +31,11 @@ const envSchema = z.object({
   // Secret for Resend webhook signature verification (optional for MVP)
   RESEND_WEBHOOK_SECRET: z.string().optional(),
   // Outbound provider: 'resend' (default) or 'ses'
-  OUTBOUND_PROVIDER: z.enum(['resend', 'ses']).default('resend'),
-  // Optional fallback provider. Fallback is attempted only after primary send failure.
-  // PGP-required aliases may fallback only after successful OpenPGP encryption.
-  OUTBOUND_FALLBACK_PROVIDER: z.enum(['none', 'resend', 'ses']).default('none'),
+  OUTBOUND_PROVIDER: z.enum(['mailbaby', 'resend', 'ses']).default('mailbaby'),
+  // Optional fallback provider (deprecated; cross-provider fallback removed)
+  OUTBOUND_FALLBACK_PROVIDER: z.enum(['none', 'mailbaby', 'resend', 'ses']).default('none'),
+  MAILBABY_SMTP_USERNAME: z.string().optional(),
+  MAILBABY_SMTP_PASSWORD: z.string().optional(),
   // AWS SES credentials (required when OUTBOUND_PROVIDER=ses)
   AWS_REGION: z.string().optional(),
   AWS_ACCESS_KEY_ID: z.string().optional(),

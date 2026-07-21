@@ -77,7 +77,7 @@ export async function assertPgpAllowed(userId: string) {
 }
 export async function assertOutboundProviderAllowed(userId: string) {
   const provider = getOutboundProvider();
-  if (provider === 'resend') return;
+  if (provider === 'mailbaby' || provider === 'resend') return;
   await assertByoSmtpAllowed(userId);
 }
 export async function assertByoSmtpAllowed(userId: string) {

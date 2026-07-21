@@ -3,7 +3,7 @@ import { db } from '../../db/client.js';
 import { aliases, domains, mailLogs, users } from '../../db/schema.js';
 import { buildEncryptedEmailForwardingJob, emailForwardingQueue } from '../../queues/email-jobs.js';
 import { logger } from '../../lib/logger.js';
-import { getPlatformDomain } from '../../config/runtime-config.js';
+import { getOutboundProvider, getPlatformDomain } from '../../config/runtime-config.js';
 import { assertCustomRelayCanAccept, SmtpRelayError } from '../smtp-relays/service.js';
 import {
   AbuseError,
@@ -67,6 +67,7 @@ interface MailLogInsert {
   spamScore?: number;
   spamCategory?: string | null;
   spamAction?: string | null;
+  outboundProvider?: 'mailbaby' | 'resend' | 'ses' | 'custom_smtp' | null;
 }
 
 
@@ -124,6 +125,7 @@ async function insertMailLog(data: MailLogInsert) {
       spamScore: data.spamScore ?? 0,
       spamCategory: data.spamCategory ?? null,
       spamAction: data.spamAction ?? null,
+      outboundProvider: data.outboundProvider ?? null,
     })
     .returning({ id: mailLogs.id });
 }
@@ -285,6 +287,7 @@ export async function handleInbound(
   }
 
   const routeMode = alias.outboundMode ?? 'platform';
+  const outboundProvider = routeMode === 'platform' ? getOutboundProvider() : undefined;
   const relayId = alias.smtpRelayId ?? undefined;
   let credentialVersion: number | undefined;
   let halfOpenProbe = false;
@@ -297,7 +300,7 @@ export async function handleInbound(
       if (!credentialVersion) throw new SmtpRelayError('Relay has no active credential version', 451, 'credential_version_unavailable');
     } catch (error) {
       const code = error instanceof SmtpRelayError ? error.code : 'relay_unavailable';
-      await insertMailLog({ ...baseLog, ...spamLogFields, aliasId: alias.id, outboundRouteMode: 'custom_smtp', smtpRelayId: relayId, status: 'rejected', rejectionReason: code });
+      await insertMailLog({ ...baseLog, ...spamLogFields, aliasId: alias.id, outboundRouteMode: 'custom_smtp', outboundProvider: 'custom_smtp', smtpRelayId: relayId, status: 'rejected', rejectionReason: code });
       throw new InboundError('Custom SMTP relay is unavailable', 451);
     }
   }
@@ -307,6 +310,7 @@ export async function handleInbound(
     ...spamLogFields,
     aliasId: alias.id,
     outboundRouteMode: routeMode,
+    outboundProvider: routeMode === 'custom_smtp' ? 'custom_smtp' : outboundProvider,
     smtpRelayId: relayId ?? null,
     forwardedTo: recipient.email,
     status: 'queued',
@@ -316,6 +320,7 @@ export async function handleInbound(
     aliasId: alias.id,
     messageId: log.id,
     routeMode,
+    outboundProvider,
     relayId,
     credentialVersion,
     halfOpenProbe,
