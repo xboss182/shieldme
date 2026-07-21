@@ -63,10 +63,34 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
 
   logger.info({ jobId: job.id, logId, aliasId }, 'Processing forwarding job');
 
-  if (payload.routeMode !== 'custom_smtp' && !isOutboundConfigured()) {
-    logger.warn({ jobId: job.id, logId }, 'Outbound provider not configured — forwarding skipped');
-    await db.update(mailLogs).set({ status: 'failed', rejectionReason: 'outbound_not_configured', updatedAt: new Date() }).where(eq(mailLogs.id, logId));
-    return;
+  const customSmtp = payload.routeMode === 'custom_smtp';
+  const effectiveProvider = payload.outboundProvider;
+
+  if (!customSmtp) {
+    if (!effectiveProvider) {
+      logger.warn({ jobId: job.id, logId }, 'Legacy unpinned forwarding job rejected — missing outbound provider');
+      await db.update(mailLogs).set({
+        status: 'failed',
+        failureType: 'permanent',
+        failureReason: 'unpinned_legacy_job_rejected',
+        rejectionReason: 'unpinned_legacy_job_rejected',
+        updatedAt: new Date(),
+      }).where(eq(mailLogs.id, logId));
+      return;
+    }
+
+    if (!isOutboundConfigured(effectiveProvider)) {
+      logger.warn({ jobId: job.id, logId, provider: effectiveProvider }, 'Pinned outbound provider not configured — forwarding skipped');
+      await db.update(mailLogs).set({
+        status: 'failed',
+        outboundProvider: effectiveProvider,
+        failureType: 'permanent',
+        failureReason: 'outbound_not_configured',
+        rejectionReason: 'outbound_not_configured',
+        updatedAt: new Date(),
+      }).where(eq(mailLogs.id, logId));
+      return;
+    }
   }
 
   // ── Global kill-switch check ────────────────────────────────────────────
@@ -222,8 +246,6 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
-  const customSmtp = payload.routeMode === 'custom_smtp';
-  const effectiveProvider = payload.outboundProvider ?? getOutboundProvider();
   if (customSmtp && job.attemptsMade > 0) relayRetriesTotal.inc();
   if (customSmtp && log.createdAt instanceof Date) relayQueueWaitSeconds.observe(Math.max(0, (Date.now() - log.createdAt.getTime()) / 1_000));
   let outboundMessageId: string;
