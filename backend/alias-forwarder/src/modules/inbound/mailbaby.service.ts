@@ -3,7 +3,7 @@ import { logger } from '../../lib/logger.js';
 import type { ForwardPayload } from './resend.service.js';
 
 const MAILBABY_HOST = 'relay.mailbaby.net';
-const MAILBABY_PORT = 587;
+const MAILBABY_PORT = 2525;
 
 export type MailBabyFailureType = 'transient' | 'permanent';
 

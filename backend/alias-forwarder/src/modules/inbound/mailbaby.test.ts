@@ -41,7 +41,7 @@ describe('MailBaby adapter', () => {
     expect(isMailBabyConfigured()).toBe(true);
   });
 
-  it('configures strict STARTTLS on relay.mailbaby.net:587 with bounded timeouts and auth', async () => {
+  it('configures strict STARTTLS on relay.mailbaby.net:2525 with bounded timeouts and auth', async () => {
     process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
     process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
     mockSendMail.mockResolvedValue({ messageId: '<mb-123@relay.mailbaby.net>' });
@@ -52,7 +52,7 @@ describe('MailBaby adapter', () => {
     expect(nodemailer.createTransport).toHaveBeenCalledWith(
       expect.objectContaining({
         host: 'relay.mailbaby.net',
-        port: 587,
+        port: 2525,
         secure: false,
         requireTLS: true,
         connectionTimeout: 5000,
