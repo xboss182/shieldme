@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gte, ilike, sql } from 'drizzle-orm';
 import { db } from '../../db/client.js';
+import { env } from '../../config/env.js';
 import { aliases, auditLogs, domains, mailLogs, recipients, reservedLocalParts, users } from '../../db/schema.js';
 import { emailForwardingQueue } from '../../queues/email-jobs.js';
 import { isValidLocalPart, normalizeLocalPart } from '../aliases/local-part.js';
@@ -84,9 +85,26 @@ export async function adminSetAliasStatus(aliasId: string, status: 'active' | 'd
   const row = await db.query.aliases.findFirst({ where: eq(aliases.id, aliasId) });
   if (!row) throw new AdminError('Alias not found', 404);
   if (row.status === 'deleted') throw new AdminError('Alias is deleted', 410);
-  const [updated] = await db.update(aliases).set({ status, updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
-  await writeAuditLog(status === 'active' ? 'alias.admin_enabled' : 'alias.admin_disabled', 'alias', aliasId, { previousStatus: row.status });
-  return updated;
+  if (!env.VERIFY_ENABLED) {
+    const [updated] = await db.update(aliases).set({ status, updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
+    await writeAuditLog(status === 'active' ? 'alias.admin_enabled' : 'alias.admin_disabled', 'alias', aliasId, { previousStatus: row.status });
+    return updated;
+  }
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx.update(aliases).set({ status, updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
+    const { recordAliasStatusChangeInTransaction } = await import('../verify/verify.service.js');
+    await recordAliasStatusChangeInTransaction(tx, updated);
+    await tx.insert(auditLogs).values({
+      actorType: adminActor.type,
+      actorId: adminActor.id,
+      action: status === 'active' ? 'alias.admin_enabled' : 'alias.admin_disabled',
+      targetType: 'alias',
+      targetId: aliasId,
+      metadata: { previousStatus: row.status },
+    });
+    return updated;
+  });
 }
 export const adminDisableAlias = (aliasId: string) => adminSetAliasStatus(aliasId, 'disabled');
 export const adminEnableAlias = (aliasId: string) => adminSetAliasStatus(aliasId, 'active');
@@ -94,9 +112,26 @@ export const adminEnableAlias = (aliasId: string) => adminSetAliasStatus(aliasId
 export async function adminForceDeleteAlias(aliasId: string) {
   const row = await db.query.aliases.findFirst({ where: eq(aliases.id, aliasId) });
   if (!row) throw new AdminError('Alias not found', 404);
-  const [updated] = await db.update(aliases).set({ status: 'deleted', updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
-  await writeAuditLog('alias.force_deleted', 'alias', aliasId, { previousStatus: row.status });
-  return updated;
+  if (!env.VERIFY_ENABLED) {
+    const [updated] = await db.update(aliases).set({ status: 'deleted', updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
+    await writeAuditLog('alias.force_deleted', 'alias', aliasId, { previousStatus: row.status });
+    return updated;
+  }
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx.update(aliases).set({ status: 'deleted', updatedAt: new Date() }).where(eq(aliases.id, aliasId)).returning();
+    const { recordAliasStatusChangeInTransaction } = await import('../verify/verify.service.js');
+    await recordAliasStatusChangeInTransaction(tx, updated);
+    await tx.insert(auditLogs).values({
+      actorType: adminActor.type,
+      actorId: adminActor.id,
+      action: 'alias.force_deleted',
+      targetType: 'alias',
+      targetId: aliasId,
+      metadata: { previousStatus: row.status },
+    });
+    return updated;
+  });
 }
 
 export async function listAuditLogs(query: { action?: string; targetType?: string; actorType?: string; page?: unknown; limit?: unknown }) {

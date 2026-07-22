@@ -69,6 +69,8 @@ export function createApp() {
           'req.body.username',
           'req.body.refreshToken',
           'req.body.token',
+          'req.body.alias',
+          'req.body.verificationCode',
           'req.body.privateKey',
           'req.body.ciphertext',
           'req.body.wrappedDek',

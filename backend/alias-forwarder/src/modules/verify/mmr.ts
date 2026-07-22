@@ -150,8 +150,8 @@ export function newNodesForLeaf(
 
   newNodes.push({ startSequence: currentStart, size: currentSize, hash: currentHash });
 
-  // Merge upward while a sibling of the same size exists immediately before
-  while (currentStart > 0) {
+  // Merge only when the new subtree is a right child at this height.
+  while (currentStart % (currentSize * 2) === currentSize) {
     const siblingStart = currentStart - currentSize;
     const siblingKey = `${siblingStart}:${currentSize}`;
     const siblingHash = nodeMap.get(siblingKey);

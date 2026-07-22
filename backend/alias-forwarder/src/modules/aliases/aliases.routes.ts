@@ -13,6 +13,7 @@ import {
   getAliasStats,
   listFailedDeliveries,
   setAliasOutboundRoute,
+  getAliasVerificationCode,
 } from './aliases.service.js';
 import { createAliasSchema, updateAliasSchema } from './aliases.schemas.js';
 import { outboundRouteSchema } from '../smtp-relays/schemas.js';
@@ -50,6 +51,13 @@ aliasesRouter.get('/failed-deliveries', async (req: Request, res: Response, next
   try {
     const result = await listFailedDeliveries(req.auth!.userId, req.query);
     res.json(result);
+  } catch (err) { next(err); }
+});
+
+aliasesRouter.get('/:id/verification-code', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const verificationCode = await getAliasVerificationCode(req.auth!.userId, String(req.params.id));
+    res.json({ verificationCode });
   } catch (err) { next(err); }
 });
 

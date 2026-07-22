@@ -27,6 +27,10 @@ vi.mock('../../db/client.js', () => ({
   },
 }));
 
+vi.mock('../../config/env.js', () => ({
+  env: { VERIFY_ENABLED: false },
+}));
+
 vi.mock('../../middleware/authenticate.js', () => ({
   authenticate: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
     req.auth = { userId: 'owner-1', email: 'owner@example.com' };

@@ -6,6 +6,10 @@ vi.mock('../../db/client.js', () => ({
   db: { select: mockSelect },
 }));
 
+vi.mock('../../config/env.js', () => ({
+  env: { VERIFY_ENABLED: false },
+}));
+
 vi.mock('../../queues/email-jobs.js', () => ({
   emailForwardingQueue: { getJobCounts: vi.fn() },
 }));

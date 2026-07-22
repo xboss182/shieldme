@@ -451,6 +451,8 @@ export const aliasesApi = {
   disable: (id: string) =>
     apiFetch<{ alias: Alias }>("/api/aliases/" + id + "/disable", { method: "POST" }),
   remove: (id: string) => apiFetch<void>("/api/aliases/" + id, { method: "DELETE" }),
+  verificationCode: (id: string) =>
+    apiFetch<{ verificationCode: string }>(`/api/aliases/${id}/verification-code`),
   stats: () => apiFetch<AliasStats>("/api/aliases/stats"),
   failedDeliveries: (status?: string, page = 1, limit = 50) =>
     apiFetch<{ deliveries: FailedDelivery[]; page: number; limit: number }>(
