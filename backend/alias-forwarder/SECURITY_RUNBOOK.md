@@ -11,6 +11,11 @@
 3. Revoke the old key in Resend.
 4. Persist the new key in the PM2/runtime environment and `pm2 save`.
 
+## MailBaby forwarding DSNs
+1. Keep `MAILBABY_DSN_VERIFIED=false` until a controlled owner-address bounce is received at the SMTP ingress address `b+<token>@sm-bounces.<platform-domain>`.
+2. The ingress validates only the opaque token hash, marks the matching MailBaby mail log `bounced`, and suppresses its verified forwarding recipient. It never persists the DSN body.
+3. Set the gate to `true` only after that controlled test confirms the matching suppression entry. Unknown, expired, or malformed tokens are rejected.
+
 ## Backups
 - Run `scripts/backup-db.sh` with `DATABASE_URL` set.
 - Retain daily backups for 30 days and monthly backups for 1 year.

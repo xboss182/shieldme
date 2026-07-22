@@ -24,6 +24,8 @@ export interface ForwardPayload {
   headers?: Record<string, string>;
   textBody: string;
   htmlBody?: string;
+  rawMessage?: Buffer;
+  envelopeFrom?: string;
 }
 
 export function isResendConfigured(): boolean {

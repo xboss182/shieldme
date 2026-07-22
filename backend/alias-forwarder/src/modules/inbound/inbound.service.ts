@@ -327,6 +327,7 @@ export async function handleInbound(
     subject: envelope.subject,
     textBody: envelope.textBody,
     htmlBody: envelope.htmlBody,
+    rawMessage: envelope.rawMessage ? Buffer.from(envelope.rawMessage).toString('base64') : undefined,
     originalFrom: envelope.from,
     spamScan,
   });

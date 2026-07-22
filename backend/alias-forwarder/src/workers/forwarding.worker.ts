@@ -20,6 +20,7 @@ import { recordTtiForwarded } from '../modules/tti/tti.service.js';
 import { assertByoSmtpPilotQuota, buildBounceToken, hashBounceToken, recordCustomSmtpFailure, recordCustomSmtpSuccess, resolveCustomSmtpDelivery } from '../modules/smtp-relays/service.js';
 import { sendSmtpRelayMessage } from '../modules/smtp-relays/transport.js';
 import { acquireRelaySlot } from '../modules/smtp-relays/concurrency.js';
+import { rewriteRawForwardMessage } from '../modules/inbound/raw-forward-message.js';
 import { relayFailuresTotal, relayMetrics, relayMetricsContentType, relayQueueWaitSeconds, relayRetriesTotal, relaySubmissionsTotal } from '../modules/smtp-relays/metrics.js';
 import { configureRelayKmsFromEnv } from '../modules/smtp-relays/local-kms.js';
 
@@ -169,9 +170,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
 
   const originalFrom = payload.originalFrom ?? log.envelopeFrom;
-  const forwardFrom = originalFrom
-    ? `${originalFrom.replace(/[<>"]/g, '')} via ${log.envelopeTo} <forwarded+${alias.localPart}@${platformDomain}>`
-    : `forwarded+${alias.localPart}@${platformDomain}`;
+  const forwardFrom = `ShieldMe <forwarded+${alias.localPart}@${platformDomain}>`;
 
   const spamScan = payload.spamScan as SpamScanMetadata | undefined;
   const baseSubject = payload.subject ?? `[Forwarded] Message to ${log.envelopeTo}`;
@@ -246,9 +245,35 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
+  const rawMessage = payload.rawMessage && pgpMode === 'none'
+    ? rewriteRawForwardMessage({
+        rawMessage: Buffer.from(payload.rawMessage, 'base64'),
+        from: forwardFrom,
+        to: recipient.email,
+        replyTo: replyToFromEnvelope(originalFrom),
+        originalFrom,
+        originalMessageId: log.externalMessageId,
+        forwardedAlias: log.envelopeTo,
+        messageIdDomain: platformDomain,
+        headers,
+      })
+    : undefined;
+  if (!customSmtp && effectiveProvider === 'mailbaby' && !rawMessage && pgpMode === 'none') {
+    await db.update(mailLogs).set({
+      status: 'failed',
+      outboundProvider: effectiveProvider,
+      failureType: 'permanent',
+      failureReason: 'mailbaby_raw_message_required',
+      rejectionReason: 'mailbaby_raw_message_required',
+      updatedAt: new Date(),
+    }).where(eq(mailLogs.id, logId));
+    return;
+  }
+
   if (customSmtp && job.attemptsMade > 0) relayRetriesTotal.inc();
   if (customSmtp && log.createdAt instanceof Date) relayQueueWaitSeconds.observe(Math.max(0, (Date.now() - log.createdAt.getTime()) / 1_000));
   let outboundMessageId: string;
+  let bounceToken: string | undefined;
   try {
     if (customSmtp) {
       if (!payload.relayId || !payload.credentialVersion) throw new Error('custom_smtp_route_snapshot_missing');
@@ -276,6 +301,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         await release();
       }
     } else {
+      bounceToken = buildBounceToken();
       outboundMessageId = await sendOutbound({
         from: forwardFrom,
         to: recipient.email,
@@ -284,7 +310,13 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         textBody,
         htmlBody,
         headers,
+        rawMessage,
+        envelopeFrom: `b+${bounceToken}@sm-bounces.${platformDomain}`,
       }, { pgpRequired: pgpMode === 'required', pgpEncrypted, pinnedProvider: effectiveProvider });
+      await db.update(mailLogs).set({
+        bounceTokenHash: hashBounceToken(bounceToken),
+        bounceExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      }).where(eq(mailLogs.id, logId));
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'outbound_send_failed';

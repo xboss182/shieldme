@@ -214,6 +214,7 @@ describe('handleInbound', () => {
     expect(mockBuildEncryptedEmailForwardingJob).toHaveBeenCalledWith(expect.objectContaining({
       spamScan: expect.objectContaining({ action: 'tag' }),
       textBody: 'body text',
+      rawMessage: Buffer.from('raw message body').toString('base64'),
     }));
     const queuedPayload = mockQueueAdd.mock.calls[0][1];
     expect(queuedPayload).toEqual(expect.objectContaining({ encrypted: true, ciphertext: expect.any(String) }));

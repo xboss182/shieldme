@@ -4,6 +4,7 @@
 - [ ] Change is linked to a Multica issue or approved change record.
 - [ ] Correct production directory confirmed with `pm2 describe <service>`.
 - [ ] Secrets and raw email content are not included in commits/docs/logs.
+- [ ] For MailBaby, DKIM signing credentials are injected and `MAILBABY_DSN_VERIFIED=true` only after a controlled owner-address bounce is received through `sm-bounces.<platform-domain>` and creates a suppression entry.
 - [ ] Database migration, if any, has rollback or restore notes.
 - [ ] Backend checks passed when applicable: `npm run typecheck`, `npm test`, `npm run build`, `npm audit --omit=dev --audit-level=high`.
 - [ ] Frontend build passed when `/var/www/shieldme` changes.
