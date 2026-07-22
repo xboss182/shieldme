@@ -72,7 +72,13 @@ interface ProofResponse {
     siblings: Array<{ startSequence: number; size: number; hash: string }>;
     peaks: Array<{ startSequence: number; size: number; hash: string }>;
   };
-  head: { treeSize: number; rootHash: string; keyId: string; signature: string; publishedAt: string };
+  head: {
+    treeSize: number;
+    rootHash: string;
+    keyId: string;
+    signature: string;
+    publishedAt: string;
+  };
   signingKey: { keyId: string; publicKey: string; publicKeySha256: string } | null;
 }
 
@@ -210,7 +216,11 @@ function AliasLookupSection() {
       </form>
 
       {error && (
-        <div role="alert" aria-live="polite" className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
           <XCircle className="h-4 w-4 shrink-0" />
           {error}
         </div>
@@ -226,20 +236,28 @@ function AliasLookupSection() {
           <div className="grid gap-2 sm:grid-cols-2 text-sm">
             <div>
               <span className="text-muted-foreground">Status </span>
-              <span className="font-semibold capitalize text-foreground">{result.alias.status}</span>
+              <span className="font-semibold capitalize text-foreground">
+                {result.alias.status}
+              </span>
             </div>
             <div>
               <span className="text-muted-foreground">Created </span>
-              <span className="font-semibold text-foreground">{fmtDate(result.alias.createdAt)}</span>
+              <span className="font-semibold text-foreground">
+                {fmtDate(result.alias.createdAt)}
+              </span>
             </div>
             <div>
               <span className="text-muted-foreground">Domain status </span>
-              <span className="font-semibold capitalize text-foreground">{result.domain.status}</span>
+              <span className="font-semibold capitalize text-foreground">
+                {result.domain.status}
+              </span>
             </div>
             {result.dkim.current && (
               <div>
                 <span className="text-muted-foreground">DKIM selector </span>
-                <span className="font-semibold text-foreground">{result.dkim.current.selector}</span>
+                <span className="font-semibold text-foreground">
+                  {result.dkim.current.selector}
+                </span>
               </div>
             )}
           </div>
@@ -263,7 +281,10 @@ function AliasLookupSection() {
               </summary>
               <ul className="mt-2 space-y-2">
                 {result.dkim.history.map((k) => (
-                  <li key={k.publicKeySha256} className="rounded border border-border px-3 py-2 text-xs">
+                  <li
+                    key={k.publicKeySha256}
+                    className="rounded border border-border px-3 py-2 text-xs"
+                  >
                     <span className="font-mono">{k.selector}</span> — retired{" "}
                     {k.retiredAt ? fmtDate(k.retiredAt) : "—"}
                     <br />
@@ -304,7 +325,9 @@ function AliasLookupSection() {
                     <p className="text-xs text-muted-foreground">{rec.name}</p>
                     <code className="block break-all text-xs text-foreground">{rec.value}</code>
                     {rec.priority !== undefined && (
-                      <span className="text-xs text-muted-foreground">Priority: {rec.priority}</span>
+                      <span className="text-xs text-muted-foreground">
+                        Priority: {rec.priority}
+                      </span>
                     )}
                   </div>
                   <CopyButton value={rec.value} label={`${rec.type} record`} />
@@ -332,7 +355,10 @@ function AliasLookupSection() {
               </summary>
               <ul className="mt-2 space-y-1">
                 {result.transparency.eventIds.map((id) => (
-                  <li key={id} className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                  <li
+                    key={id}
+                    className="flex items-center gap-2 text-xs font-mono text-muted-foreground"
+                  >
                     <span className="break-all">{id}</span>
                     <CopyButton value={id} label="event ID" />
                   </li>
@@ -357,7 +383,7 @@ function TransparencyHeadSection() {
     setLoading(true);
     setError(null);
     try {
-      const data = await apiFetch<HeadResponse>("/heads/latest");
+      const data = await apiFetch<HeadResponse>("/head");
       setHead(data);
     } catch (err) {
       setError((err as Error).message);
@@ -389,7 +415,11 @@ function TransparencyHeadSection() {
       </button>
 
       {error && (
-        <div role="alert" aria-live="polite" className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
           <XCircle className="h-4 w-4 shrink-0" />
           {error}
         </div>
@@ -413,14 +443,18 @@ function TransparencyHeadSection() {
             {head.signingKey && (
               <div>
                 <span className="text-muted-foreground">Pub key SHA-256 </span>
-                <code className="text-xs text-foreground">{shortHash(head.signingKey.publicKeySha256)}</code>
+                <code className="text-xs text-foreground">
+                  {shortHash(head.signingKey.publicKeySha256)}
+                </code>
               </div>
             )}
           </div>
           <div>
             <p className="text-muted-foreground mb-1">Root hash</p>
             <div className="flex items-start gap-2">
-              <code className="break-all rounded bg-muted px-2 py-1 text-xs flex-1">{head.rootHash}</code>
+              <code className="break-all rounded bg-muted px-2 py-1 text-xs flex-1">
+                {head.rootHash}
+              </code>
               <CopyButton value={head.rootHash} label="root hash" />
             </div>
           </div>
@@ -435,7 +469,9 @@ function TransparencyHeadSection() {
           </div>
           <p className="text-xs text-muted-foreground">
             To verify the signature locally:{" "}
-            <code className="rounded bg-muted px-1">node verify-head.js shieldme-transparency-head.json</code>
+            <code className="rounded bg-muted px-1">
+              node verify-head.js shieldme-transparency-head.json
+            </code>
           </p>
         </div>
       )}
@@ -459,7 +495,9 @@ function EventProofSection() {
     setProof(null);
     setState("loading");
     try {
-      const data = await apiFetch<ProofResponse>(`/events/${encodeURIComponent(eventId.trim())}/proof`);
+      const data = await apiFetch<ProofResponse>(
+        `/events/${encodeURIComponent(eventId.trim())}/proof`,
+      );
       setProof(data);
       // Browser-side proof verification (structural check — full crypto requires SubtleCrypto)
       const valid = data.event.leafHash.length > 0 && data.head.rootHash.length > 0;
@@ -474,7 +512,10 @@ function EventProofSection() {
     <Section title="Verify an event inclusion">
       <form onSubmit={onVerify} className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
-          <label htmlFor="event-id-input" className="block text-sm font-medium text-foreground mb-1">
+          <label
+            htmlFor="event-id-input"
+            className="block text-sm font-medium text-foreground mb-1"
+          >
             Event UUID
           </label>
           <input
@@ -497,7 +538,11 @@ function EventProofSection() {
       </form>
 
       {error && (
-        <div role="alert" aria-live="polite" className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div
+          role="alert"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
           <XCircle className="h-4 w-4 shrink-0" />
           {error}
         </div>
@@ -505,17 +550,39 @@ function EventProofSection() {
 
       {(state === "valid" || state === "invalid") && proof && (
         <div aria-live="polite" className="space-y-3">
-          <div className={`flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold ${state === "valid" ? "border border-green-500/40 bg-green-500/10 text-green-600" : "border border-destructive/40 bg-destructive/10 text-destructive"}`}>
-            {state === "valid"
-              ? <><CheckCircle className="h-4 w-4" /> Proof structure valid — leaf and root hash present</>
-              : <><XCircle className="h-4 w-4" /> Invalid proof</>
-            }
+          <div
+            className={`flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold ${state === "valid" ? "border border-green-500/40 bg-green-500/10 text-green-600" : "border border-destructive/40 bg-destructive/10 text-destructive"}`}
+          >
+            {state === "valid" ? (
+              <>
+                <CheckCircle className="h-4 w-4" /> Proof structure valid — leaf and root hash
+                present
+              </>
+            ) : (
+              <>
+                <XCircle className="h-4 w-4" /> Invalid proof
+              </>
+            )}
           </div>
           <div className="text-sm space-y-1">
-            <p><span className="text-muted-foreground">Event type </span><span className="font-semibold text-foreground">{proof.event.eventType}</span></p>
-            <p><span className="text-muted-foreground">Sequence </span><span className="font-semibold text-foreground">{proof.event.sequence}</span></p>
-            <p><span className="text-muted-foreground">Occurred </span><span className="font-semibold text-foreground">{fmtDate(proof.event.occurredAt)}</span></p>
-            <p><span className="text-muted-foreground">Tree size </span><span className="font-semibold text-foreground">{proof.head.treeSize}</span></p>
+            <p>
+              <span className="text-muted-foreground">Event type </span>
+              <span className="font-semibold text-foreground">{proof.event.eventType}</span>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Sequence </span>
+              <span className="font-semibold text-foreground">{proof.event.sequence}</span>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Occurred </span>
+              <span className="font-semibold text-foreground">
+                {fmtDate(proof.event.occurredAt)}
+              </span>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Tree size </span>
+              <span className="font-semibold text-foreground">{proof.head.treeSize}</span>
+            </p>
           </div>
         </div>
       )}
@@ -533,10 +600,22 @@ function ThreatModelSection() {
           <p className="font-semibold text-foreground mb-1">It proves</p>
           <ul className="list-disc pl-5 space-y-1">
             <li>A supplied event was included in the signed tree at the stated size and root.</li>
-            <li>The event's public fields were not changed without altering the leaf hash, root, and signature.</li>
-            <li>A later signed head extends a prior retained head through the append-only MMR structure.</li>
-            <li>The DKIM fingerprint and expected DNS records are the values ShieldMe committed at response time.</li>
-            <li>Log entries contain no message body, subject, sender, recipient, or provider message ID.</li>
+            <li>
+              The event's public fields were not changed without altering the leaf hash, root, and
+              signature.
+            </li>
+            <li>
+              A later signed head extends a prior retained head through the append-only MMR
+              structure.
+            </li>
+            <li>
+              The DKIM fingerprint and expected DNS records are the values ShieldMe committed at
+              response time.
+            </li>
+            <li>
+              Log entries contain no message body, subject, sender, recipient, or provider message
+              ID.
+            </li>
           </ul>
         </div>
         <div>
@@ -545,7 +624,9 @@ function ThreatModelSection() {
             <li>ShieldMe cannot see plaintext — normal SMTP forwarding is server-side.</li>
             <li>An email was delivered to, read by, or retained by a destination inbox.</li>
             <li>The same root was served to every observer (no independent witnesses yet).</li>
-            <li>Every real-world event was logged if ShieldMe's server trust boundary is compromised.</li>
+            <li>
+              Every real-world event was logged if ShieldMe's server trust boundary is compromised.
+            </li>
             <li>Hardware, SGX, OPAQUE, zero-knowledge, or third-party attestation of any kind.</li>
           </ul>
         </div>
@@ -575,8 +656,8 @@ function VerifyPage() {
           <h1 className="mt-4 text-4xl font-bold md:text-5xl">Verify ShieldMe transparency</h1>
           <p className="mt-4 text-muted-foreground">
             Signed public commitments for alias lifecycle and mail security. Check your alias
-            status, DKIM keys, expected DNS records, and verify event inclusion in the
-            append-only transparency log.
+            status, DKIM keys, expected DNS records, and verify event inclusion in the append-only
+            transparency log.
           </p>
         </div>
 

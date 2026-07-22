@@ -81,20 +81,22 @@ verifyRouter.post('/aliases/lookup', verifyAliasLimiter, async (req, res, next) 
   }
 });
 
-// GET /api/verify/heads/latest
-verifyRouter.get('/heads/latest', verifyGeneralLimiter, async (req, res, next) => {
+async function latestHeadHandler(_req: Request, res: Response, next: NextFunction) {
   try {
     const head = await getLatestHead();
     if (!head) {
       return res.status(404).json({ error: 'No transparency head available' });
     }
     res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=86400');
-    res.setHeader('ETag', `"${head.rootHash}"`);
+    res.setHeader('ETag', `\"${head.rootHash}\"`);
     return res.status(200).json(head);
   } catch (err) {
     next(err);
   }
-});
+}
+
+verifyRouter.get('/head', verifyGeneralLimiter, latestHeadHandler);
+verifyRouter.get('/heads/latest', verifyGeneralLimiter, latestHeadHandler);
 
 // GET /api/verify/events/:eventId/proof
 verifyRouter.get('/events/:eventId/proof', verifyGeneralLimiter, async (req, res, next) => {

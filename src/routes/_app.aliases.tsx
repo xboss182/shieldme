@@ -55,7 +55,7 @@ import {
 
 export const Route = createFileRoute("/_app/aliases")({ component: AliasesPage });
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -65,15 +65,44 @@ function CopyButton({ text }: { text: string }) {
         setTimeout(() => setCopied(false), 2000);
       }}
       className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-surface-2 hover:text-foreground"
-      title="Copy alias"
+      title={label}
     >
       {copied ? (
         <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
       ) : (
         <Copy className="h-3.5 w-3.5" />
       )}
-      {copied ? "Copied" : "Copy"}
+      {copied ? "Copied" : label}
     </button>
+  );
+}
+
+function AliasVerificationCode({ aliasId }: { aliasId: string }) {
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mutation = useMutation({
+    mutationFn: () => aliasesApi.verificationCode(aliasId),
+    onSuccess: ({ verificationCode }) => {
+      setCode(verificationCode);
+      setError(null);
+    },
+    onError: () => setError("Verification code is unavailable."),
+  });
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        className="rounded-lg"
+        onClick={() => mutation.mutate()}
+        disabled={mutation.isPending}
+      >
+        {mutation.isPending ? "Loading..." : "Show verification code"}
+      </Button>
+      {code && <CopyButton text={code} label="Copy verification code" />}
+      {error && <span className="text-xs text-destructive">{error}</span>}
+    </div>
   );
 }
 
@@ -427,6 +456,7 @@ function AliasCard({
               <span className="mt-0.5 block text-xs text-muted-foreground">→ {recipientEmail}</span>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+              <AliasVerificationCode aliasId={alias.id} />
               <span className="inline-flex items-center gap-1">
                 <Calendar className="h-3 w-3" />
                 {createdDate}

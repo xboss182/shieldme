@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { and, eq, ne, sql, count, inArray } from 'drizzle-orm';
 import { db } from '../../db/client.js';
 import { aliases, domains, mailLogs, reservedLocalParts } from '../../db/schema.js';
+import { env } from '../../config/env.js';
 import type { PgpKeyInfo } from '../pgp/pgp.service.js';
 import { assertDomainVerified } from '../domains/domains.service.js';
 import { assertRecipientVerified } from '../recipients/recipients.service.js';
@@ -158,8 +159,19 @@ export async function createAlias(ownerId: string, input: CreateAliasInput) {
       continue;
     }
     try {
-      const [alias] = await db.insert(aliases).values({ ownerId, domainId: input.domainId, recipientId: input.recipientId, localPart, pgpMode: input.pgpMode ?? 'none' }).returning();
-      return { alias, address: `${alias.localPart}@${domain.domain}`, recipientEmail: recipient.email };
+      const alias = env.VERIFY_ENABLED
+        ? await db.transaction(async (tx) => {
+            const [created] = await tx.insert(aliases).values({ ownerId, domainId: input.domainId, recipientId: input.recipientId, localPart, pgpMode: input.pgpMode ?? 'none' }).returning();
+            const { recordAliasCreatedInTransaction } = await import('../verify/verify.service.js');
+            await recordAliasCreatedInTransaction(tx, created);
+            return created;
+          })
+        : (await db.insert(aliases).values({ ownerId, domainId: input.domainId, recipientId: input.recipientId, localPart, pgpMode: input.pgpMode ?? 'none' }).returning())[0];
+      return {
+        alias,
+        address: `${alias.localPart}@${domain.domain}`,
+        recipientEmail: recipient.email,
+      };
     } catch (err) {
       if (isReservedAliasDatabaseError(err)) {
         if (!input.localPart) continue;
@@ -209,6 +221,16 @@ export async function updateAlias(ownerId: string, aliasId: string, input: Updat
     .where(eq(aliases.id, aliasId))
     .returning();
   return updated;
+}
+
+export async function getAliasVerificationCode(ownerId: string, aliasId: string) {
+  if (!env.VERIFY_ENABLED) throw new AliasError('Verification is unavailable', 404);
+  const alias = await db.query.aliases.findFirst({
+    where: and(eq(aliases.id, aliasId), eq(aliases.ownerId, ownerId)),
+  });
+  if (!alias) throw new AliasError('Alias not found', 404);
+  const { getVerifyCodeForAlias } = await import('../verify/verify.service.js');
+  return getVerifyCodeForAlias(alias.id);
 }
 
 export async function listAliases(ownerId: string) {
@@ -285,12 +307,25 @@ export async function enableAlias(ownerId: string, aliasId: string) {
   if (row.status === 'deleted') throw new AliasError('Alias has been deleted', 410);
   if (row.status === 'active') throw new AliasError('Alias is already active', 409);
 
-  const [updated] = await db
-    .update(aliases)
-    .set({ status: 'active', updatedAt: new Date() })
-    .where(eq(aliases.id, aliasId))
-    .returning();
-  return updated;
+  if (!env.VERIFY_ENABLED) {
+    const [updated] = await db
+      .update(aliases)
+      .set({ status: 'active', updatedAt: new Date() })
+      .where(eq(aliases.id, aliasId))
+      .returning();
+    return updated;
+  }
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(aliases)
+      .set({ status: 'active', updatedAt: new Date() })
+      .where(eq(aliases.id, aliasId))
+      .returning();
+    const { recordAliasStatusChangeInTransaction } = await import('../verify/verify.service.js');
+    await recordAliasStatusChangeInTransaction(tx, updated);
+    return updated;
+  });
 }
 
 export async function disableAlias(ownerId: string, aliasId: string) {
@@ -301,12 +336,25 @@ export async function disableAlias(ownerId: string, aliasId: string) {
   if (row.status === 'deleted') throw new AliasError('Alias has been deleted', 410);
   if (row.status === 'disabled') throw new AliasError('Alias is already disabled', 409);
 
-  const [updated] = await db
-    .update(aliases)
-    .set({ status: 'disabled', updatedAt: new Date() })
-    .where(eq(aliases.id, aliasId))
-    .returning();
-  return updated;
+  if (!env.VERIFY_ENABLED) {
+    const [updated] = await db
+      .update(aliases)
+      .set({ status: 'disabled', updatedAt: new Date() })
+      .where(eq(aliases.id, aliasId))
+      .returning();
+    return updated;
+  }
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(aliases)
+      .set({ status: 'disabled', updatedAt: new Date() })
+      .where(eq(aliases.id, aliasId))
+      .returning();
+    const { recordAliasStatusChangeInTransaction } = await import('../verify/verify.service.js');
+    await recordAliasStatusChangeInTransaction(tx, updated);
+    return updated;
+  });
 }
 
 export async function deleteAlias(ownerId: string, aliasId: string) {
@@ -316,10 +364,23 @@ export async function deleteAlias(ownerId: string, aliasId: string) {
   if (!row) throw new AliasError('Alias not found', 404);
   if (row.status === 'deleted') throw new AliasError('Alias already deleted', 410);
 
-  await db
-    .update(aliases)
-    .set({ status: 'deleted', updatedAt: new Date() })
-    .where(eq(aliases.id, aliasId));
+  const updatedAt = new Date();
+  if (!env.VERIFY_ENABLED) {
+    await db
+      .update(aliases)
+      .set({ status: 'deleted', updatedAt })
+      .where(eq(aliases.id, aliasId));
+    return;
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(aliases)
+      .set({ status: 'deleted', updatedAt })
+      .where(eq(aliases.id, aliasId));
+    const { recordAliasStatusChangeInTransaction } = await import('../verify/verify.service.js');
+    await recordAliasStatusChangeInTransaction(tx, { id: row.id, status: 'deleted', updatedAt });
+  });
 }
 
 export async function getAliasStats(ownerId: string) {
