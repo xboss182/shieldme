@@ -1,5 +1,6 @@
 import { sendViaResend, isResendConfigured } from './resend.service.js';
 import { sendViaMailBaby, isMailBabyConfigured, MailBabyError } from './mailbaby.service.js';
+export { isMailBabyCircuitOpen, recordMailBabyFailure, recordMailBabySuccess, MailBabyError } from './mailbaby.service.js';
 import { logger } from '../../lib/logger.js';
 import type { ForwardPayload } from './resend.service.js';
 
@@ -30,7 +31,7 @@ function isProviderConfigured(provider: OutboundProvider): boolean {
 async function sendViaProvider(provider: OutboundProvider, payload: ForwardPayload): Promise<string> {
   if (provider === 'mailbaby') {
     if (!isMailBabyConfigured()) {
-      throw new Error('MailBaby selected but MAILBABY_SMTP_USERNAME or MAILBABY_SMTP_PASSWORD is not configured');
+      throw new Error('MailBaby selected but forwarding identity is not configured');
     }
     return sendViaMailBaby(payload);
   }

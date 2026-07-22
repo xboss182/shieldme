@@ -17,7 +17,22 @@ const {
   mockDecryptQueuePayload,
   mockBuildForwardBanner,
   mockBuildForwardBannerText,
-} = vi.hoisted(() => ({
+  mockIsMailBabyCircuitOpen,
+  mockRecordMailBabyFailure,
+  mockRecordMailBabySuccess,
+  mockAddToSuppressionList,
+  MockMailBabyError,
+} = vi.hoisted(() => {
+  class MailBabyError extends Error {
+    constructor(
+      code: string,
+      public readonly failureType: 'transient' | 'permanent',
+      public readonly kind: 'recipient' | 'provider' | 'transport',
+    ) {
+      super(code);
+    }
+  }
+  return {
   mockMailLogsFindFirst: vi.fn(),
   mockAliasesFindFirst: vi.fn(),
   mockMailLogsUpdate: vi.fn(),
@@ -33,7 +48,13 @@ const {
   mockDecryptQueuePayload: vi.fn((data) => data),
   mockBuildForwardBanner: vi.fn().mockReturnValue('<banner/>'),
   mockBuildForwardBannerText: vi.fn().mockReturnValue('[banner] '),
-}));
+  mockIsMailBabyCircuitOpen: vi.fn().mockResolvedValue(false),
+  mockRecordMailBabyFailure: vi.fn().mockResolvedValue(undefined),
+  mockRecordMailBabySuccess: vi.fn().mockResolvedValue(undefined),
+  mockAddToSuppressionList: vi.fn().mockResolvedValue(undefined),
+  MockMailBabyError: MailBabyError,
+  };
+});
 
 vi.mock('../db/client.js', () => ({
   db: {
@@ -48,6 +69,11 @@ vi.mock('../db/client.js', () => ({
 vi.mock('../modules/inbound/outbound.service.js', () => ({
   sendOutbound: mockSendOutbound,
   isOutboundConfigured: mockIsOutboundConfigured,
+  isPermanentOutboundError: vi.fn((error) => error?.failureType === 'permanent'),
+  isMailBabyCircuitOpen: mockIsMailBabyCircuitOpen,
+  recordMailBabyFailure: mockRecordMailBabyFailure,
+  recordMailBabySuccess: mockRecordMailBabySuccess,
+  MailBabyError: MockMailBabyError,
 }));
 
 vi.mock('../modules/pgp/pgp.service.js', () => ({
@@ -55,6 +81,9 @@ vi.mock('../modules/pgp/pgp.service.js', () => ({
   encryptWithPgpKey: mockEncryptWithPgpKey,
 }));
 
+vi.mock('../modules/abuse/abuse.service.js', () => ({
+  addToSuppressionList: mockAddToSuppressionList,
+}));
 
 vi.mock('../modules/plans/plans.js', () => ({
   assertMonthlyForwardAllowed: mockAssertMonthlyForwardAllowed,
@@ -153,6 +182,7 @@ function makeLog() {
     envelopeFrom: 'sender@sender.com',
     envelopeTo: 'hello@example.com',
     externalMessageId: 'ext-msg-1',
+    createdAt: new Date('2026-07-22T00:00:00Z'),
   };
 }
 
@@ -165,8 +195,9 @@ function makeJob(overrides = {}) {
       originalFrom: 'sender@sender.com',
       subject: 'Test subject',
       textBody: 'Hello world',
-      htmlBody: '<p>Hello world</p>',
-      outboundProvider: 'mailbaby',
+       htmlBody: '<p>Hello world</p>',
+       bounceToken: 'a'.repeat(64),
+       outboundProvider: 'mailbaby',
       ...overrides,
     },
   };
@@ -224,17 +255,90 @@ describe('forwarding worker — outbound provider', () => {
     );
   });
 
-  it('delivers via sendOutbound on happy path', async () => {
+  it('delivers MailBaby with a rewritten raw MIME message and explicit bounce envelope', async () => {
     mockMailLogsFindFirst.mockResolvedValue(makeLog());
     mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
     makeUpdateChain();
+    const rawMessage = Buffer.from([
+      'From: sender@sender.com',
+      'Message-ID: <original@example.test>',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/related; boundary="part"',
+      '',
+      '--part',
+      'Content-Type: text/plain',
+      '',
+      'Message body',
+      '--part',
+      'Content-Type: image/png',
+      'Content-Disposition: inline; filename="logo.png"',
+      'Content-ID: <logo>',
+      'Content-Transfer-Encoding: base64',
+      '',
+      'aW1hZ2UtYnl0ZXM=',
+      '--part--',
+      '',
+    ].join('\r\n'));
 
     const processor = getProcessor();
-    await processor(makeJob({ outboundProvider: 'mailbaby' }));
+    await processor(makeJob({ outboundProvider: 'mailbaby', rawMessageBase64: rawMessage.toString('base64') }));
 
     expect(mockSendOutbound).toHaveBeenCalledOnce();
-    const policyCall = mockSendOutbound.mock.calls[0][1];
-    expect(policyCall.pinnedProvider).toBe('mailbaby');
+    const [message, policy] = mockSendOutbound.mock.calls[0];
+    expect(policy.pinnedProvider).toBe('mailbaby');
+    expect(message.envelopeFrom).toMatch(/^b\+[a-f0-9]{64}@sm-bounces\.shieldme\.cc$/);
+    expect(message.raw).toEqual(expect.any(Buffer));
+    const forwarded = message.raw.toString('latin1');
+    expect(forwarded).toContain('From: "sender sender.com via ShieldMe" <forwarded+hello@shieldme.cc>');
+    expect(forwarded).toContain('Reply-To: sender@sender.com');
+    expect(forwarded).toContain('Date: Wed, 22 Jul 2026 00:00:00 GMT');
+    expect(forwarded).toMatch(/Message-ID: <[a-f0-9]{64}@shieldme\.cc>/);
+    expect(forwarded).toContain('X-ShieldMe-Original-DKIM: nested-original-not-valid-for-forward');
+    expect(forwarded).toMatch(/X-ShieldMe-Original-SHA256: [a-f0-9]{64}/);
+    expect(forwarded).toContain('<banner/>');
+    expect(forwarded).toContain('[banner] ');
+    expect(forwarded).toContain('Content-Type: message/rfc822');
+    expect(forwarded).toContain('Content-Disposition: attachment; filename="forwarded-message.eml"');
+    expect(forwarded).toContain('Content-Disposition: inline; filename="logo.png"');
+    const nestedAt = message.raw.indexOf(rawMessage);
+    expect(nestedAt).toBeGreaterThanOrEqual(0);
+    expect(message.raw.subarray(nestedAt, nestedAt + rawMessage.length)).toEqual(rawMessage);
+    expect(message.headers).not.toHaveProperty('X-ShieldMe-Tracking-Protection');
+    expect(message.headers).not.toHaveProperty('X-ShieldMe-Tracking-Pixels-Removed');
+    expect(message.headers).not.toHaveProperty('X-ShieldMe-Tracking-Links-Rewritten');
+    expect(mockRecordMailBabySuccess).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed when a legacy MailBaby job has no DSN correlation token', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    const { setFn } = makeUpdateChain();
+
+    const processor = getProcessor();
+    await processor(makeJob({ outboundProvider: 'mailbaby', bounceToken: undefined }));
+
+    expect(mockSendOutbound).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      failureType: 'permanent',
+      failureReason: 'mailbaby_bounce_token_missing',
+    }));
+  });
+
+  it('fails closed when encrypted raw MIME declares an incomplete multipart body', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    const { setFn } = makeUpdateChain();
+    const malformed = Buffer.from('Content-Type: multipart/mixed; boundary="part"\r\n\r\n--part\r\nContent-Type: text/plain\r\n\r\nHi\r\n');
+
+    const processor = getProcessor();
+    await processor(makeJob({ outboundProvider: 'mailbaby', rawMessageBase64: malformed.toString('base64') }));
+
+    expect(mockSendOutbound).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      failureReason: 'mailbaby_raw_message_invalid',
+    }));
   });
 
   it('proceeds with Resend-pinned retry when global config is MailBaby but MailBaby is unconfigured and Resend is configured', async () => {
@@ -250,6 +354,21 @@ describe('forwarding worker — outbound provider', () => {
     expect(mockSendOutbound).toHaveBeenCalledOnce();
     const policyCall = mockSendOutbound.mock.calls[0][1];
     expect(policyCall.pinnedProvider).toBe('resend');
+  });
+
+  it('suppresses a MailBaby recipient bounce without switching providers', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    makeUpdateChain();
+    mockSendOutbound.mockRejectedValue(new MockMailBabyError('mailbaby_recipient_5xx', 'permanent', 'recipient'));
+
+    const processor = getProcessor();
+    await processor(makeJob({ outboundProvider: 'mailbaby' }));
+
+    expect(mockRecordMailBabyFailure).toHaveBeenCalledWith(expect.objectContaining({ kind: 'recipient' }));
+    expect(mockAddToSuppressionList).toHaveBeenCalledWith('user@personal.com', 'bounce');
+    expect(mockSendOutbound).toHaveBeenCalledOnce();
+    expect(mockSendOutbound.mock.calls[0][1].pinnedProvider).toBe('mailbaby');
   });
 
   it('adds spam headers and tags subject for suspicious mail', async () => {

@@ -65,6 +65,12 @@ vi.mock('../spam/spam-scanner.service.js', () => ({
   scanInboundMail: mockScanInboundMail,
 }));
 
+vi.mock('../smtp-relays/service.js', () => ({
+  assertCustomRelayCanAccept: vi.fn(),
+  buildBounceToken: () => 'b'.repeat(64),
+  SmtpRelayError: class SmtpRelayError extends Error {},
+}));
+
 vi.mock('../abuse/abuse.service.js', () => ({
   AbuseError: class AbuseError extends Error {
     constructor(msg: string, public statusCode = 550) { super(msg); }
@@ -166,11 +172,12 @@ describe('handleInbound', () => {
       forwardedTo: 'user@personal.com',
       status: 'queued',
     }));
-    expect(mockBuildEncryptedEmailForwardingJob).toHaveBeenCalledWith(expect.objectContaining({
-      aliasId: ALIAS_ID,
-      messageId: LOG_ID,
-      originalFrom: 'original-sender@senderdomain.test',
-    }));
+     expect(mockBuildEncryptedEmailForwardingJob).toHaveBeenCalledWith(expect.objectContaining({
+       aliasId: ALIAS_ID,
+       messageId: LOG_ID,
+       originalFrom: 'original-sender@senderdomain.test',
+       bounceToken: 'b'.repeat(64),
+     }));
   });
 
   it('stores parsed mail authentication results without rejecting the message', async () => {
@@ -211,10 +218,11 @@ describe('handleInbound', () => {
     }));
     expect(mockInsertValues.mock.calls[0][0]).not.toHaveProperty('textBody');
     expect(mockInsertValues.mock.calls[0][0]).not.toHaveProperty('rawMessage');
-    expect(mockBuildEncryptedEmailForwardingJob).toHaveBeenCalledWith(expect.objectContaining({
-      spamScan: expect.objectContaining({ action: 'tag' }),
-      textBody: 'body text',
-    }));
+     expect(mockBuildEncryptedEmailForwardingJob).toHaveBeenCalledWith(expect.objectContaining({
+       spamScan: expect.objectContaining({ action: 'tag' }),
+       textBody: 'body text',
+       rawMessageBase64: Buffer.from('raw message body').toString('base64'),
+     }));
     const queuedPayload = mockQueueAdd.mock.calls[0][1];
     expect(queuedPayload).toEqual(expect.objectContaining({ encrypted: true, ciphertext: expect.any(String) }));
     expect(queuedPayload).not.toHaveProperty('textBody');

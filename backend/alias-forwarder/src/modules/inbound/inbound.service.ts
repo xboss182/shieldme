@@ -4,7 +4,7 @@ import { aliases, domains, mailLogs, users } from '../../db/schema.js';
 import { buildEncryptedEmailForwardingJob, emailForwardingQueue } from '../../queues/email-jobs.js';
 import { logger } from '../../lib/logger.js';
 import { getOutboundProvider, getPlatformDomain } from '../../config/runtime-config.js';
-import { assertCustomRelayCanAccept, SmtpRelayError } from '../smtp-relays/service.js';
+import { assertCustomRelayCanAccept, buildBounceToken, SmtpRelayError } from '../smtp-relays/service.js';
 import {
   AbuseError,
   checkRateLimits,
@@ -324,9 +324,11 @@ export async function handleInbound(
     relayId,
     credentialVersion,
     halfOpenProbe,
+    bounceToken: routeMode === 'platform' && outboundProvider === 'mailbaby' ? buildBounceToken() : undefined,
     subject: envelope.subject,
     textBody: envelope.textBody,
     htmlBody: envelope.htmlBody,
+    rawMessageBase64: envelope.rawMessage ? Buffer.from(envelope.rawMessage).toString('base64') : undefined,
     originalFrom: envelope.from,
     spamScan,
   });

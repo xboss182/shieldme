@@ -14,12 +14,15 @@ export type EmailForwardingPayload = {
   relayId?: string;
   credentialVersion?: number;
   halfOpenProbe?: boolean;
+  bounceToken?: string;
   /** Original email subject */
   subject?: string;
   /** Original email plain-text body */
   textBody?: string;
   /** Original email HTML body */
   htmlBody?: string;
+  /** Exact inbound RFC 822 bytes, base64 encoded for encrypted queue persistence. */
+  rawMessageBase64?: string;
   /** Original sender address (envelope from) */
   originalFrom?: string;
   /** Spam scan metadata only; never includes message body. */

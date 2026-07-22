@@ -4,17 +4,16 @@
 
 ## Outbound delivery policy
 
-- Primary provider is selected by `OUTBOUND_PROVIDER` (`resend` or `ses`).
-- Optional fallback is selected by `OUTBOUND_FALLBACK_PROVIDER` (`none`, `resend`, or `ses`). Default: `none`.
-- Fallback is attempted only after the primary provider throws and the fallback provider is configured.
-- For aliases with `pgpMode = required`, fallback is allowed only when the message body has already been OpenPGP-encrypted in memory (`pgpEncrypted=true`). A PGP-required message that cannot be encrypted must remain rejected; never send plaintext through either provider.
-- Optional PGP mode may fall back to plaintext only if encryption was not required by the alias policy.
+- Primary provider is selected by `OUTBOUND_PROVIDER` (`mailbaby` or `resend`). Jobs pin that provider at enqueue time; there is no implicit fallback.
+- MailBaby uses SMTP on `relay.mailbaby.net:2525` with certificate-verified STARTTLS and SMTP credentials. `/mail/rawsend` is not used because its custom-envelope semantics have not been independently proven; retain this as a vendor gate before any transport change.
+- MailBaby receives a rewritten RFC 822 message: the original MIME body and attachments are retained, while `From`, `Reply-To`, loop-prevention, and forwarding headers are rebuilt. Original DKIM signatures cannot survive that rewrite and are removed; MailBaby DKIM-signs the final message with ShieldMe's verified-domain key.
+- MailBaby forwarding uses an explicit `b+<token>@sm-bounces.<platform-domain>` envelope sender. Only its hash is persisted for 30 days; an inbound DSN resolves it to metadata, marks the delivery bounced, and suppresses the destination.
+- For aliases with `pgpMode = required`, a message that cannot be encrypted remains rejected; plaintext fallback is never allowed.
 
-### Local DKIM / SRS decision
+### DKIM / bounce-domain decision
 
-- Current provider DKIM (Resend/SES domain authentication) remains the safest default for ShieldMe-controlled outbound domains.
-- Local DKIM signing should be added only if ShieldMe starts sending through a raw SMTP relay/MTA that does not already sign with aligned DKIM. Store private keys outside git and rotate selector-based keys.
-- SRS rewriting should be implemented at the SMTP/MTA layer only when ShieldMe forwards with the original envelope sender and recipient systems show SPF/DMARC failures. The current app-level provider send path uses ShieldMe-controlled `forwarded+...@shieldme.cc` sender identity and does not require SRS in application code.
+- MailBaby's SMTP adapter signs final rewritten messages with ShieldMe's configured DKIM domain, selector, and private key. Keep the private key in runtime secrets or Ansible Vault and rotate selector-based keys.
+- The explicit ShieldMe bounce-domain envelope is the current SRS-equivalent correlation contract. Do not forward with the original envelope sender unless an SMTP/MTA-layer SRS implementation and live DMARC evidence are approved.
 
 ## DMARC alignment monitoring
 
