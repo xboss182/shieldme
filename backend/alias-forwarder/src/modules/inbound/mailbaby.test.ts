@@ -1,8 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ForwardPayload } from './resend.service.js';
 
-const mockSendMail = vi.fn();
-const mockClose = vi.fn();
+const {
+  mockSendMail,
+  mockClose,
+  mockRedisGet,
+  mockRedisSet,
+  mockRedisIncr,
+  mockRedisExpire,
+  mockRedisDel,
+} = vi.hoisted(() => ({
+  mockSendMail: vi.fn(),
+  mockClose: vi.fn(),
+  mockRedisGet: vi.fn(),
+  mockRedisSet: vi.fn(),
+  mockRedisIncr: vi.fn(),
+  mockRedisExpire: vi.fn(),
+  mockRedisDel: vi.fn(),
+}));
 
 vi.mock('nodemailer', () => ({
   default: {
@@ -17,33 +32,59 @@ vi.mock('../../lib/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+vi.mock('../../lib/redis.js', () => ({
+  redis: {
+    get: mockRedisGet,
+    set: mockRedisSet,
+    incr: mockRedisIncr,
+    expire: mockRedisExpire,
+    del: mockRedisDel,
+  },
+}));
+
 import nodemailer from 'nodemailer';
-import { isMailBabyConfigured, sendViaMailBaby, MailBabyError } from './mailbaby.service.js';
+import { isMailBabyConfigured, isMailBabyCircuitOpen, recordMailBabyFailure, recordMailBabySuccess, sendViaMailBaby, MailBabyError } from './mailbaby.service.js';
+import { buildRawForwardedMessage } from '../../lib/forwarded-message.js';
 
 const PAYLOAD: ForwardPayload = {
-  from: 'forwarded+alias@shieldme.cc',
+  from: 'Forwarded via ShieldMe <forwarded+alias@shieldme.cc>',
   to: 'recipient@domain.com',
   subject: 'Test subject',
   textBody: 'Hello world',
+  envelopeFrom: 'b+0123456789abcdef@bounces.shieldme.cc',
+  attachments: [{ filename: 'statement.pdf', content: 'cGRmLWJ5dGVz', encoding: 'base64', contentType: 'application/pdf' }],
 };
+
+function configureMailBaby() {
+  process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
+  process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+  process.env['MAILBABY_DKIM_DOMAIN'] = 'shieldme.cc';
+  process.env['MAILBABY_DKIM_SELECTOR'] = 'mail';
+  process.env['MAILBABY_DKIM_PRIVATE_KEY'] = 'test-private-key';
+}
 
 describe('MailBaby adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRedisGet.mockResolvedValue(null);
+    mockRedisIncr.mockResolvedValue(1);
     delete process.env['MAILBABY_SMTP_USERNAME'];
     delete process.env['MAILBABY_SMTP_PASSWORD'];
+    delete process.env['MAILBABY_DKIM_DOMAIN'];
+    delete process.env['MAILBABY_DKIM_SELECTOR'];
+    delete process.env['MAILBABY_DKIM_PRIVATE_KEY'];
   });
 
-  it('detects credentials when configured', () => {
-    expect(isMailBabyConfigured()).toBe(false);
+  it('requires SMTP credentials and ShieldMe DKIM signing identity', () => {
     process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
     process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+    expect(isMailBabyConfigured()).toBe(false);
+    configureMailBaby();
     expect(isMailBabyConfigured()).toBe(true);
   });
 
-  it('configures strict STARTTLS on relay.mailbaby.net:2525 with bounded timeouts and auth', async () => {
-    process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
-    process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+  it('preserves the explicit envelope, MIME attachments, and ShieldMe DKIM identity over strict STARTTLS', async () => {
+    configureMailBaby();
     mockSendMail.mockResolvedValue({ messageId: '<mb-123@relay.mailbaby.net>' });
 
     const messageId = await sendViaMailBaby(PAYLOAD);
@@ -64,13 +105,58 @@ describe('MailBaby adapter', () => {
           minVersion: 'TLSv1.2',
         }),
         auth: { user: 'mb_user', pass: 'mb_pass' },
+        dkim: { domainName: 'shieldme.cc', keySelector: 'mail', privateKey: 'test-private-key' },
       }),
     );
+    expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({
+      from: PAYLOAD.from,
+      envelope: { from: PAYLOAD.envelopeFrom, to: [PAYLOAD.to] },
+      attachments: PAYLOAD.attachments,
+    }));
+  });
+
+  it('opens the provider circuit for permanent infrastructure errors but not recipient bounces', async () => {
+    await recordMailBabyFailure(new MailBabyError('mailbaby_auth_failed', 'permanent', 'provider'));
+    expect(mockRedisSet).toHaveBeenCalledWith('outbound:mailbaby:circuit', 'open', 'EX', 900);
+
+    vi.clearAllMocks();
+    await recordMailBabyFailure(new MailBabyError('mailbaby_recipient_5xx', 'permanent', 'recipient'));
+    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockRedisIncr).not.toHaveBeenCalled();
+  });
+
+  it('opens after three transient failures and clears state after success', async () => {
+    mockRedisIncr.mockResolvedValue(3);
+    await recordMailBabyFailure(new MailBabyError('mailbaby_connection_failed', 'transient', 'transport'));
+    expect(mockRedisSet).toHaveBeenCalledWith('outbound:mailbaby:circuit', 'open', 'EX', 900);
+
+    mockRedisGet.mockResolvedValue('open');
+    await expect(isMailBabyCircuitOpen()).resolves.toBe(true);
+    await recordMailBabySuccess();
+    expect(mockRedisDel).toHaveBeenCalledWith('outbound:mailbaby:failures', 'outbound:mailbaby:circuit');
+  });
+
+  it('sends the final rewritten RFC 822 bytes for MailBaby DKIM signing', async () => {
+    configureMailBaby();
+    mockSendMail.mockResolvedValue({ messageId: '<mb-raw@relay.mailbaby.net>' });
+    const raw = buildRawForwardedMessage({
+      rawMessage: Buffer.from('Content-Type: multipart/mixed; boundary="part"\r\n\r\n--part\r\nContent-Type: text/plain\r\n\r\nHi\r\n--part--\r\n'),
+      from: PAYLOAD.from,
+      to: PAYLOAD.to,
+      subject: PAYLOAD.subject,
+      messageDomain: 'shieldme.cc',
+    });
+
+    await sendViaMailBaby({ ...PAYLOAD, raw });
+
+    expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({
+      raw,
+      envelope: { from: PAYLOAD.envelopeFrom, to: [PAYLOAD.to] },
+    }));
   });
 
   it('classifies auth and 5xx failures as permanent and closes transport', async () => {
-    process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
-    process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+    configureMailBaby();
     mockSendMail.mockRejectedValue(Object.assign(new Error('Invalid login or password'), { code: 'EAUTH', responseCode: 535 }));
 
     await expect(sendViaMailBaby(PAYLOAD)).rejects.toMatchObject({
@@ -81,8 +167,7 @@ describe('MailBaby adapter', () => {
   });
 
   it('classifies 4xx and network timeouts as transient and closes transport', async () => {
-    process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
-    process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+    configureMailBaby();
     mockSendMail.mockRejectedValue(Object.assign(new Error('Connection timed out'), { code: 'ETIMEDOUT' }));
 
     await expect(sendViaMailBaby(PAYLOAD)).rejects.toMatchObject({

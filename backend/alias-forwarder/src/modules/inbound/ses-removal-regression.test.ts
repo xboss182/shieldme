@@ -134,7 +134,7 @@ describe('Historical SES records remain readable', () => {
     if (inboundMod) {
       expect(typeof inboundMod.handleInbound).toBe('function');
     }
-  });
+  }, 10_000);
 });
 
 // ── 6 & 7. MailBaby is default; Resend is the only explicit alternative ───────

@@ -7,11 +7,13 @@ import { db } from '../db/client.js';
 import { aliases, mailLogs } from '../db/schema.js';
 import { getPlatformDomain, isForwardingEnabled, getOutboundProvider, isOutboundConfigured } from '../config/runtime-config.js';
 import { logger } from '../lib/logger.js';
-import { isPermanentOutboundError, sendOutbound } from '../modules/inbound/outbound.service.js';
+import { isMailBabyCircuitOpen, isPermanentOutboundError, MailBabyError, recordMailBabyFailure, recordMailBabySuccess, sendOutbound } from '../modules/inbound/outbound.service.js';
 import { emailForwardingQueueName, type EmailForwardingJob, type EmailForwardingPayload } from '../queues/email-jobs.js';
 import { decryptQueuePayload } from '../queues/secure-email-jobs.js';
 import { buildForwardBanner, buildForwardBannerText } from '../lib/forward-banner.js';
+import { buildRawForwardedMessage } from '../lib/forwarded-message.js';
 import { getArmoredKeyForRecipient, encryptWithPgpKey } from '../modules/pgp/pgp.service.js';
+import { addToSuppressionList } from '../modules/abuse/abuse.service.js';
 import { assertByoSmtpAllowed, assertMonthlyForwardAllowed, assertOutboundProviderAllowed, PlanLimitError } from '../modules/plans/plans.js';
 import { buildSpamHeaders, tagSubject, type SpamScanMetadata } from '../modules/spam/spam-scanner.service.js';
 import { env } from '../config/env.js';
@@ -169,9 +171,8 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
 
   const originalFrom = payload.originalFrom ?? log.envelopeFrom;
-  const forwardFrom = originalFrom
-    ? `${originalFrom.replace(/[<>"]/g, '')} via ${log.envelopeTo} <forwarded+${alias.localPart}@${platformDomain}>`
-    : `forwarded+${alias.localPart}@${platformDomain}`;
+  const forwardIdentity = `forwarded+${alias.localPart}@${platformDomain}`;
+  const forwardFrom = smtpForwardFrom(originalFrom, forwardIdentity);
 
   const spamScan = payload.spamScan as SpamScanMetadata | undefined;
   const baseSubject = payload.subject ?? `[Forwarded] Message to ${log.envelopeTo}`;
@@ -248,16 +249,74 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
 
   if (customSmtp && job.attemptsMade > 0) relayRetriesTotal.inc();
   if (customSmtp && log.createdAt instanceof Date) relayQueueWaitSeconds.observe(Math.max(0, (Date.now() - log.createdAt.getTime()) / 1_000));
+  if (!customSmtp && effectiveProvider === 'mailbaby' && await isMailBabyCircuitOpen()) {
+    await db.update(mailLogs).set({
+      status: 'failed',
+      outboundProvider: effectiveProvider,
+      failureType: 'permanent',
+      failureReason: 'mailbaby_circuit_open',
+      rejectionReason: 'mailbaby_circuit_open',
+      updatedAt: new Date(),
+    }).where(eq(mailLogs.id, logId));
+    return;
+  }
+  const bounceToken = customSmtp ? buildBounceToken() : effectiveProvider === 'mailbaby' ? payload.bounceToken : undefined;
+  if (effectiveProvider === 'mailbaby' && !bounceToken) {
+    await db.update(mailLogs).set({
+      status: 'failed',
+      outboundProvider: effectiveProvider,
+      failureType: 'permanent',
+      failureReason: 'mailbaby_bounce_token_missing',
+      rejectionReason: 'mailbaby_bounce_token_missing',
+      updatedAt: new Date(),
+    }).where(eq(mailLogs.id, logId));
+    return;
+  }
+  const envelopeFrom = bounceToken ? `b+${bounceToken}@sm-bounces.${platformDomain}` : undefined;
+  if (bounceToken) {
+    await db.update(mailLogs).set({
+      bounceTokenHash: hashBounceToken(bounceToken),
+      bounceExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      updatedAt: new Date(),
+    }).where(eq(mailLogs.id, logId));
+  }
+
+  let rawMessage: Buffer | undefined;
+  if (effectiveProvider === 'mailbaby' && !pgpEncrypted && payload.rawMessageBase64) {
+    try {
+      rawMessage = buildRawForwardedMessage({
+        rawMessage: Buffer.from(payload.rawMessageBase64, 'base64'),
+        from: forwardFrom,
+        to: recipient.email,
+        subject,
+        replyTo: replyToFromEnvelope(originalFrom),
+        originalFrom,
+        originalMessageId: log.externalMessageId ?? undefined,
+        messageId: `<${hashBounceToken(bounceToken ?? logId)}@${platformDomain}>`,
+        messageDomain: platformDomain,
+        headers,
+      });
+    } catch {
+      await db.update(mailLogs).set({
+        status: 'failed',
+        outboundProvider: effectiveProvider,
+        failureType: 'permanent',
+        failureReason: 'mailbaby_raw_message_invalid',
+        rejectionReason: 'mailbaby_raw_message_invalid',
+        updatedAt: new Date(),
+      }).where(eq(mailLogs.id, logId));
+      return;
+    }
+  }
+
   let outboundMessageId: string;
   try {
     if (customSmtp) {
-      if (!payload.relayId || !payload.credentialVersion) throw new Error('custom_smtp_route_snapshot_missing');
+      if (!payload.relayId || !payload.credentialVersion || !envelopeFrom) throw new Error('custom_smtp_route_snapshot_missing');
       const { relay, transport } = await resolveCustomSmtpDelivery(ownerId, payload.relayId, payload.credentialVersion, payload.halfOpenProbe);
       const release = await acquireRelaySlot(ownerId, relay.id);
       try {
         await assertByoSmtpPilotQuota(ownerId);
-        const bounceToken = buildBounceToken();
-        const envelopeFrom = `b+${bounceToken}@sm-bounces.${domain.domain}`;
         const identity = `${relay.identityLocalPart}@${domain.domain}`;
         outboundMessageId = await sendSmtpRelayMessage(transport, {
           from: smtpForwardFrom(originalFrom, identity),
@@ -271,7 +330,6 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         });
         await recordCustomSmtpSuccess(relay.id);
         relaySubmissionsTotal.inc();
-        await db.update(mailLogs).set({ bounceTokenHash: hashBounceToken(bounceToken), bounceExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) }).where(eq(mailLogs.id, logId));
       } finally {
         await release();
       }
@@ -284,11 +342,22 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         textBody,
         htmlBody,
         headers,
+        raw: rawMessage,
+        envelopeFrom,
       }, { pgpRequired: pgpMode === 'required', pgpEncrypted, pinnedProvider: effectiveProvider });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'outbound_send_failed';
     const customRouteUnavailable = /custom_smtp_route_snapshot_missing|relay_unavailable|credential_version_unavailable|BYO SMTP is unavailable|Relay credentials are unavailable/.test(message);
+    const mailBabyError = !customSmtp && effectiveProvider === 'mailbaby' && err instanceof MailBabyError ? err : undefined;
+    if (mailBabyError) {
+      try {
+        await recordMailBabyFailure(mailBabyError);
+        if (mailBabyError.kind === 'recipient') await addToSuppressionList(recipient.email, 'bounce');
+      } catch {
+        logger.error({ logId }, 'MailBaby failure state could not be recorded');
+      }
+    }
     const permanent = customRouteUnavailable || isPermanentOutboundError(err) || /invalid|suppressed|blocked|complaint|bounce|permanent|5\d\d|auth|tls|certificate|dns|unsafe/.test(message);
     const exhausted = job.attemptsMade + 1 >= 3;
     const failureCode = customSmtp ? customSmtpFailureCode(err) : message.slice(0, 80);
@@ -310,6 +379,13 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
 
   await db.update(mailLogs).set({ status: 'delivered', resendMessageId: customSmtp ? null : outboundMessageId, providerMessageId: outboundMessageId, outboundProvider: customSmtp ? 'custom_smtp' : effectiveProvider, smtpResponseClass: customSmtp ? '2xx' : null, attemptCount: job.attemptsMade + 1, trackingProtection: trackingProtection.metadata, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
+  if (!customSmtp && effectiveProvider === 'mailbaby') {
+    try {
+      await recordMailBabySuccess();
+    } catch {
+      logger.error({ logId }, 'MailBaby success state could not be recorded');
+    }
+  }
   const ttiProbeToken = subject.match(/\[shieldme-tti:([a-zA-Z0-9_-]{8,128})\]/)?.[1];
   if (ttiProbeToken) {
     await recordTtiForwarded({

@@ -51,7 +51,7 @@ adminRouter.use((req, res, next) => {
 });
 function getConfigResponse() {
   const resendConfigured = Boolean(getResendApiKey());
-  const mailbabyConfigured = Boolean(process.env['MAILBABY_SMTP_USERNAME'] && process.env['MAILBABY_SMTP_PASSWORD']);
+  const mailbabyConfigured = isOutboundConfigured('mailbaby');
   return {
     platformDomain: getPlatformDomain() ?? null,
     resendConfigured,

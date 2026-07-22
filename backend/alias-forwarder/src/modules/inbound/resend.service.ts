@@ -16,6 +16,15 @@ function getResend(): Resend | null {
   return _resend;
 }
 
+export type ForwardAttachment = {
+  filename?: string;
+  content: string;
+  encoding: 'base64';
+  contentType?: string;
+  contentDisposition?: 'attachment' | 'inline';
+  cid?: string;
+};
+
 export interface ForwardPayload {
   from: string;
   to: string;
@@ -24,6 +33,11 @@ export interface ForwardPayload {
   headers?: Record<string, string>;
   textBody: string;
   htmlBody?: string;
+  attachments?: ForwardAttachment[];
+  /** Complete rewritten RFC 822 content. It preserves the original MIME body. */
+  raw?: Buffer;
+  /** SMTP MAIL FROM. Required for providers that support forwarding DSNs. */
+  envelopeFrom?: string;
 }
 
 export function isResendConfigured(): boolean {

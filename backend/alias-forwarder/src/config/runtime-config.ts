@@ -123,7 +123,13 @@ export function getOutboundProvider(): OutboundProvider {
 export function isOutboundConfigured(explicitProvider?: OutboundProvider): boolean {
   const provider = explicitProvider ?? getOutboundProvider();
   if (provider === 'mailbaby') {
-    return Boolean(process.env['MAILBABY_SMTP_USERNAME'] && process.env['MAILBABY_SMTP_PASSWORD']);
+    return Boolean(
+      process.env['MAILBABY_SMTP_USERNAME']
+      && process.env['MAILBABY_SMTP_PASSWORD']
+      && process.env['MAILBABY_DKIM_DOMAIN']
+      && process.env['MAILBABY_DKIM_SELECTOR']
+      && process.env['MAILBABY_DKIM_PRIVATE_KEY'],
+    );
   }
   // resend
   return Boolean(getResendApiKey());
