@@ -46,6 +46,7 @@ shieldme_env_template:
   BYO_SMTP_PILOT_CONCURRENCY: "1"
   RELAY_KMS_SOCKET_PATH: /run/shieldme-relay-kms/kms.sock
   RELAY_METRICS_PORT: "9405"
+  GIT_REVISION: "{{ shieldme_git_revision | default('') }}"
 shieldme_outbound_provider: mailbaby
 shieldme_mailbaby_smtp_username: REPLACE_WITH_VAULTED_SECRET
 shieldme_mailbaby_smtp_password: REPLACE_WITH_VAULTED_SECRET
@@ -56,6 +57,8 @@ shieldme_relay_kms_active_key_id: v1
 shieldme_relay_pilot_owner_ids: []
 shieldme_relay_approved_hosts: []
 shieldme_relay_metrics_port: 9405
+# Commit SHA baked in at deploy time — pass via: -e shieldme_git_revision=$(git rev-parse HEAD)
+shieldme_git_revision: ""
 shieldme_prometheus_rules_path: /etc/prometheus/rules
 base_os_disable_password_ssh: true
 base_os_disable_swap: false

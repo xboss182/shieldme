@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool } from '../../db/client.js';
 import { redis } from '../../lib/redis.js';
+import { env } from '../../config/env.js';
 
 export const healthRouter = Router();
 
@@ -38,5 +39,6 @@ healthRouter.get('/', async (_req, res) => {
       postgres,
       redis: redisStatus,
     },
+    ...(env.GIT_REVISION ? { revision: env.GIT_REVISION } : {}),
   });
 });

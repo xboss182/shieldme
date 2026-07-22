@@ -59,6 +59,8 @@ const envSchema = z.object({
   RELAY_METRICS_PORT: z.coerce.number().int().positive().optional(),
   BYO_SMTP_PILOT_MAX_MONTHLY_FORWARDS: z.coerce.number().int().min(1).max(1_000).default(25),
   BYO_SMTP_PILOT_CONCURRENCY: z.coerce.number().int().min(1).max(5).default(1),
+  // Immutable commit SHA baked in at build/deploy time for revision verification
+  GIT_REVISION: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
