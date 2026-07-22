@@ -155,6 +155,12 @@ export const domainSigningKeys = pgTable('domain_signing_keys', {
   verifiedAt: timestamp('verified_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // Transparency extensions — additive, nullable for existing rows
+  publicKeySha256: text('public_key_sha256'),
+  expectedDnsName: text('expected_dns_name'),
+  activatedAt: timestamp('activated_at', { withTimezone: true }),
+  retiredAt: timestamp('retired_at', { withTimezone: true }),
+  signingSource: text('signing_source'),
 }, (t) => [
   unique('domain_signing_keys_domain_selector_unique').on(t.domainId, t.selector),
 ]);
@@ -369,4 +375,86 @@ export const ttiChecks = pgTable('tti_checks', {
   failureReason: text('failure_reason'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// ── Transparency log (Phase /verify) ─────────────────────────────────────────
+export const transparencyEventTypeEnum = pgEnum('transparency_event_type', [
+  'alias.created',
+  'alias.disabled',
+  'alias.enabled',
+  'alias.deleted',
+  'alias.forward_count_daily',
+  'dkim.activated',
+  'dkim.retired',
+  'provider.changed',
+  'migration.snapshot',
+]);
+
+export const transparencyEvents = pgTable('transparency_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  sequence: bigint('sequence', { mode: 'number' }).notNull().unique(),
+  eventType: transparencyEventTypeEnum('event_type').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  publicPayload: jsonb('public_payload').notNull(),
+  canonicalVersion: integer('canonical_version').notNull().default(1),
+  leafHash: text('leaf_hash').notNull().unique(),
+  idempotencyKey: text('idempotency_key').unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('transparency_events_sequence_idx').on(t.sequence),
+]);
+
+export const transparencyEventLinks = pgTable('transparency_event_links', {
+  eventId: uuid('event_id').primaryKey().references(() => transparencyEvents.id),
+  aliasId: uuid('alias_id').references(() => aliases.id, { onDelete: 'set null' }),
+  domainId: uuid('domain_id').references(() => domains.id, { onDelete: 'set null' }),
+  utcDate: text('utc_date'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const aliasVerifyCapabilities = pgTable('alias_verify_capabilities', {
+  aliasId: uuid('alias_id').primaryKey().references(() => aliases.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  version: integer('version').notNull().default(1),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+});
+
+export const aliasDailyForwardCounts = pgTable('alias_daily_forward_counts', {
+  aliasId: uuid('alias_id').notNull().references(() => aliases.id, { onDelete: 'cascade' }),
+  utcDate: text('utc_date').notNull(),
+  forwardedCount: integer('forwarded_count').notNull().default(0),
+  publishedEventId: uuid('published_event_id').unique().references(() => transparencyEvents.id),
+  finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+}, (t) => [
+  unique('alias_daily_forward_counts_pk').on(t.aliasId, t.utcDate),
+]);
+
+export const transparencyMmrNodes = pgTable('transparency_mmr_nodes', {
+  startSequence: bigint('start_sequence', { mode: 'number' }).notNull(),
+  size: bigint('size', { mode: 'number' }).notNull(),
+  hash: text('hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  unique('transparency_mmr_nodes_pk').on(t.startSequence, t.size),
+]);
+
+export const transparencyHeads = pgTable('transparency_heads', {
+  treeSize: bigint('tree_size', { mode: 'number' }).primaryKey(),
+  rootHash: text('root_hash').notNull().unique(),
+  previousHeadHash: text('previous_head_hash'),
+  keyId: text('key_id').notNull(),
+  signature: text('signature').notNull(),
+  publishedAt: timestamp('published_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const providerTransparencyProfiles = pgTable('provider_transparency_profiles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  providerId: text('provider_id').notNull(),
+  customerSpfValue: text('customer_spf_value').notNull(),
+  platformSpfInclude: text('platform_spf_include'),
+  dkimIdentityDescription: text('dkim_identity_description').notNull(),
+  profileSha256: text('profile_sha256').notNull(),
+  effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull().defaultNow(),
+  retiredAt: timestamp('retired_at', { withTimezone: true }),
 });
