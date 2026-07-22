@@ -38,6 +38,7 @@ const envSchema = z.object({
   MAILBABY_DKIM_SELECTOR: z.string().optional(),
   MAILBABY_DKIM_PRIVATE_KEY: z.string().optional(),
   MAILBABY_DSN_VERIFIED: z.enum(['true', 'false']).default('false'),
+  SMTP_DSN_TRUSTED_SOURCE_IPS: z.string().default(''),
   // Admin API secret key (Bearer token for /api/admin endpoints)
   ADMIN_SECRET: z.string().min(32).optional(),
   // Inbound Spam Scanner controls. Defaults are conservative: tag only.
