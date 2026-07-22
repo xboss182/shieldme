@@ -30,6 +30,10 @@ const PAYLOAD: ForwardPayload = {
 describe('MailBaby adapter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env['MAILBABY_DSN_VERIFIED'] = 'true';
+    process.env['MAILBABY_DKIM_DOMAIN'] = 'shieldme.cc';
+    process.env['MAILBABY_DKIM_SELECTOR'] = 'mail';
+    process.env['MAILBABY_DKIM_PRIVATE_KEY'] = 'test-private-key';
     delete process.env['MAILBABY_SMTP_USERNAME'];
     delete process.env['MAILBABY_SMTP_PASSWORD'];
   });
@@ -64,8 +68,35 @@ describe('MailBaby adapter', () => {
           minVersion: 'TLSv1.2',
         }),
         auth: { user: 'mb_user', pass: 'mb_pass' },
+        dkim: { domainName: 'shieldme.cc', keySelector: 'mail', privateKey: 'test-private-key' },
       }),
     );
+  });
+
+  it('fails closed until MailBaby DSN handling has been verified', async () => {
+    process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
+    process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+    process.env['MAILBABY_DSN_VERIFIED'] = 'false';
+
+    await expect(sendViaMailBaby(PAYLOAD)).rejects.toMatchObject({
+      code: 'mailbaby_dsn_unverified',
+      failureType: 'permanent',
+    });
+    expect(nodemailer.createTransport).not.toHaveBeenCalled();
+  });
+
+  it('sends final rewritten RFC 822 bytes with an explicit envelope sender', async () => {
+    process.env['MAILBABY_SMTP_USERNAME'] = 'mb_user';
+    process.env['MAILBABY_SMTP_PASSWORD'] = 'mb_pass';
+    mockSendMail.mockResolvedValue({ messageId: '<mb-raw@relay.mailbaby.net>' });
+    const rawMessage = Buffer.from('From: ShieldMe <forwarded+alias@shieldme.cc>\r\nTo: recipient@domain.com\r\n\r\nbody');
+
+    await sendViaMailBaby({ ...PAYLOAD, rawMessage, envelopeFrom: 'b+token@sm-bounces.shieldme.cc' });
+
+    expect(mockSendMail).toHaveBeenCalledWith({
+      raw: rawMessage,
+      envelope: { from: 'b+token@sm-bounces.shieldme.cc', to: ['recipient@domain.com'] },
+    });
   });
 
   it('classifies auth and 5xx failures as permanent and closes transport', async () => {

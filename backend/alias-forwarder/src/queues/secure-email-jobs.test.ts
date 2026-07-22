@@ -42,6 +42,7 @@ describe('retry/dead-letter no-body guarantees', () => {
       subject: 'Secret subject',
       textBody: 'super secret plaintext body',
       htmlBody: '<p>super secret plaintext body</p>',
+      rawMessage: Buffer.from('super secret plaintext body').toString('base64'),
       originalFrom: 'sender@example.com',
     });
 
@@ -49,6 +50,7 @@ describe('retry/dead-letter no-body guarantees', () => {
     expect(job.encrypted).toBe(true);
     expect(serialized).not.toContain('super secret plaintext body');
     expect(serialized).not.toContain('<p>super secret plaintext body</p>');
+    expect(serialized).not.toContain(Buffer.from('super secret plaintext body').toString('base64'));
     expect(serialized).not.toContain('Secret subject');
     expect(serialized).toContain('ciphertext');
   });

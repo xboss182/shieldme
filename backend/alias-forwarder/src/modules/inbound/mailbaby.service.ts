@@ -26,6 +26,13 @@ export function isMailBabyConfigured(): boolean {
   return Boolean(credentials());
 }
 
+function dkim() {
+  const domainName = process.env['MAILBABY_DKIM_DOMAIN'];
+  const keySelector = process.env['MAILBABY_DKIM_SELECTOR'];
+  const privateKey = process.env['MAILBABY_DKIM_PRIVATE_KEY']?.replace(/\\n/g, '\n');
+  return domainName && keySelector && privateKey ? { domainName, keySelector, privateKey } : undefined;
+}
+
 function classifyMailBabyError(error: unknown): MailBabyError {
   const detail = error as { code?: unknown; responseCode?: unknown; message?: unknown };
   const responseCode = typeof detail.responseCode === 'number' ? detail.responseCode : undefined;
@@ -43,6 +50,9 @@ function classifyMailBabyError(error: unknown): MailBabyError {
 export async function sendViaMailBaby(payload: ForwardPayload): Promise<string> {
   const auth = credentials();
   if (!auth) throw new MailBabyError('mailbaby_credentials_missing', 'permanent');
+  if (process.env['MAILBABY_DSN_VERIFIED'] !== 'true') throw new MailBabyError('mailbaby_dsn_unverified', 'permanent');
+  const signing = dkim();
+  if (!signing) throw new MailBabyError('mailbaby_dkim_not_configured', 'permanent');
 
   // requireTLS blocks SMTP AUTH until the certificate-verified STARTTLS upgrade succeeds.
   const transport = nodemailer.createTransport({
@@ -53,6 +63,7 @@ export async function sendViaMailBaby(payload: ForwardPayload): Promise<string> 
     ignoreTLS: false,
     opportunisticTLS: false,
     auth,
+    dkim: signing,
     connectionTimeout: 5_000,
     greetingTimeout: 10_000,
     socketTimeout: 15_000,
@@ -64,15 +75,21 @@ export async function sendViaMailBaby(payload: ForwardPayload): Promise<string> 
   });
 
   try {
-    const result = await transport.sendMail({
-      from: payload.from,
-      to: payload.to,
-      subject: payload.subject,
-      replyTo: payload.replyTo,
-      text: payload.textBody,
-      html: payload.htmlBody,
-      headers: payload.headers,
-    });
+    const result = await transport.sendMail(payload.rawMessage
+      ? {
+          raw: payload.rawMessage,
+          envelope: { from: payload.envelopeFrom ?? payload.from, to: [payload.to] },
+        }
+      : {
+          from: payload.from,
+          to: payload.to,
+          subject: payload.subject,
+          replyTo: payload.replyTo,
+          text: payload.textBody,
+          html: payload.htmlBody,
+          headers: payload.headers,
+          envelope: { from: payload.envelopeFrom ?? payload.from, to: [payload.to] },
+        });
     const messageId = String(result.messageId ?? 'mailbaby_submitted');
     logger.info({ provider: 'mailbaby', messageId }, 'Mail delivered via MailBaby');
     return messageId;

@@ -20,6 +20,7 @@ export type EmailForwardingPayload = {
   textBody?: string;
   /** Original email HTML body */
   htmlBody?: string;
+  rawMessage?: string;
   /** Original sender address (envelope from) */
   originalFrom?: string;
   /** Spam scan metadata only; never includes message body. */

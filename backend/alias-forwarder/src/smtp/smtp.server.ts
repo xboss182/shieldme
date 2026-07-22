@@ -65,7 +65,12 @@ export function createSmtpServer() {
             const domain = at === -1 ? '' : rcpt.address.slice(at + 1).toLowerCase();
             const bounceToken = domain.startsWith('sm-bounces.') ? localPart.match(/^b\+([a-f0-9]{48,128})$/i)?.[1] : undefined;
             if (bounceToken) {
-              if (!(await processSmtpBounce(bounceToken))) throw new Error('Unknown bounce recipient');
+              if (!(await processSmtpBounce(bounceToken, {
+                rawMessage: raw,
+                sizeBytes,
+                envelopeFrom: session.envelope.mailFrom ? session.envelope.mailFrom.address : '',
+                remoteAddress: session.remoteAddress,
+              }))) throw new Error('Invalid bounce DSN');
               continue;
             }
             await handleInbound({

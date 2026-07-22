@@ -166,6 +166,7 @@ function makeJob(overrides = {}) {
       subject: 'Test subject',
       textBody: 'Hello world',
       htmlBody: '<p>Hello world</p>',
+      rawMessage: Buffer.from('From: sender@sender.com\r\nTo: hello@example.com\r\nSubject: Test subject\r\nContent-Type: text/plain\r\n\r\nHello world').toString('base64'),
       outboundProvider: 'mailbaby',
       ...overrides,
     },
@@ -233,8 +234,27 @@ describe('forwarding worker — outbound provider', () => {
     await processor(makeJob({ outboundProvider: 'mailbaby' }));
 
     expect(mockSendOutbound).toHaveBeenCalledOnce();
-    const policyCall = mockSendOutbound.mock.calls[0][1];
+    const [payload, policyCall] = mockSendOutbound.mock.calls[0];
     expect(policyCall.pinnedProvider).toBe('mailbaby');
+    expect(payload.from).toBe('ShieldMe <forwarded+hello@shieldme.cc>');
+    expect(payload.envelopeFrom).toMatch(/^b\+[a-f0-9]{64}@sm-bounces\.shieldme\.cc$/);
+    expect(payload.replyTo).toBe('sender@sender.com');
+    expect(payload.rawMessage.toString('latin1')).toContain('X-Forwarded-For-Alias: hello@example.com');
+  });
+
+  it('fails closed instead of flattening a MailBaby message when raw RFC 822 bytes are unavailable', async () => {
+    mockMailLogsFindFirst.mockResolvedValue(makeLog());
+    mockAliasesFindFirst.mockResolvedValue(makeAlias('none'));
+    const { setFn } = makeUpdateChain();
+
+    await getProcessor()(makeJob({ rawMessage: undefined, outboundProvider: 'mailbaby' }));
+
+    expect(mockSendOutbound).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'failed',
+      failureType: 'permanent',
+      failureReason: 'mailbaby_raw_message_required',
+    }));
   });
 
   it('proceeds with Resend-pinned retry when global config is MailBaby but MailBaby is unconfigured and Resend is configured', async () => {
