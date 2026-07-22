@@ -4,7 +4,7 @@
  */
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
 import {
@@ -17,8 +17,7 @@ import {
 
 function clientIp(req: Request): string {
   const cf = req.headers['cf-connecting-ip'];
-  if (cf && typeof cf === 'string') return cf.trim();
-  return req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  return ipKeyGenerator(cf && typeof cf === 'string' ? cf.trim() : req.ip ?? req.socket.remoteAddress ?? 'unknown');
 }
 
 // Dedicated limiter for alias capability verification
@@ -57,7 +56,7 @@ verifyRouter.post('/aliases/lookup', verifyAliasLimiter, async (req, res, next) 
   try {
     const schema = z.object({
       alias: z.string().trim().toLowerCase().email().max(255),
-      verificationCode: z.string().trim().min(1).max(100),
+      verificationCode: z.string().trim().min(1).max(100).regex(/^[A-Za-z0-9_-]+$/),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
