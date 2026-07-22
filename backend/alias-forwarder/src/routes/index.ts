@@ -10,6 +10,7 @@ import { pgpRouter, pgpErrorHandler } from '../modules/pgp/pgp.routes.js';
 import { plansRouter, planErrorHandler } from '../modules/plans/plans.routes.js';
 import { deliveryFailuresRouter } from '../modules/delivery/delivery-failures.routes.js';
 import { smtpRelaysRouter, smtpRelayErrorHandler } from '../modules/smtp-relays/routes.js';
+import { verifyRouter, verifyErrorHandler } from '../modules/verify/verify.routes.js';
 
 export const apiRouter = Router();
 
@@ -24,6 +25,7 @@ apiRouter.use('/plans', plansRouter);
 apiRouter.use('/admin', adminRouter);
 apiRouter.use('/webhooks', webhookRouter);
 apiRouter.use('/delivery-failures', deliveryFailuresRouter);
+apiRouter.use('/verify', verifyRouter);
 
 // Error handlers — order matters: specific first
 apiRouter.use(authErrorHandler);
@@ -34,3 +36,4 @@ apiRouter.use(aliasErrorHandler);
 apiRouter.use(smtpRelayErrorHandler);
 apiRouter.use(adminErrorHandler);
 apiRouter.use(planErrorHandler);
+apiRouter.use(verifyErrorHandler);

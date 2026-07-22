@@ -61,6 +61,14 @@ const envSchema = z.object({
   BYO_SMTP_PILOT_CONCURRENCY: z.coerce.number().int().min(1).max(5).default(1),
   // Immutable commit SHA baked in at build/deploy time for revision verification
   GIT_REVISION: z.string().optional(),
+  // Transparency log signing key (Ed25519, base64url-encoded 32-byte seed)
+  TRANSPARENCY_SIGNING_PRIVATE_KEY: z.string().optional(),
+  // Key identifier for the active signing key (short string, e.g. "v1")
+  TRANSPARENCY_SIGNING_KEY_ID: z.string().optional(),
+  // HMAC-SHA-256 pepper for alias verify capability codes (hex-encoded 32 bytes)
+  TRANSPARENCY_VERIFY_CODE_PEPPER: z.string().optional(),
+  // Feature flag: enable /api/verify routes when 'true'
+  VERIFY_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as V2RouteImport } from './routes/v2'
 import { Route as UpgradesRouteImport } from './routes/upgrades'
+import { Route as VerifyRouteImport } from './routes/verify'
 import { Route as SecurityRouteImport } from './routes/security'
 import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as MailSecurityRouteImport } from './routes/mail-security'
@@ -36,6 +37,11 @@ const V2Route = V2RouteImport.update({
 const UpgradesRoute = UpgradesRouteImport.update({
   id: '/upgrades',
   path: '/upgrades',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyRoute = VerifyRouteImport.update({
+  id: '/verify',
+  path: '/verify',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SecurityRoute = SecurityRouteImport.update({
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/privacy': typeof PrivacyRoute
   '/security': typeof SecurityRoute
   '/upgrades': typeof UpgradesRoute
+  '/verify': typeof VerifyRoute
   '/v2': typeof V2Route
   '/admin': typeof AppAdminRoute
   '/aliases': typeof AppAliasesRoute
@@ -141,6 +148,7 @@ export interface FileRoutesByTo {
   '/privacy': typeof PrivacyRoute
   '/security': typeof SecurityRoute
   '/upgrades': typeof UpgradesRoute
+  '/verify': typeof VerifyRoute
   '/v2': typeof V2Route
   '/admin': typeof AppAdminRoute
   '/aliases': typeof AppAliasesRoute
@@ -162,6 +170,7 @@ export interface FileRoutesById {
   '/privacy': typeof PrivacyRoute
   '/security': typeof SecurityRoute
   '/upgrades': typeof UpgradesRoute
+  '/verify': typeof VerifyRoute
   '/v2': typeof V2Route
   '/_app/admin': typeof AppAdminRoute
   '/_app/aliases': typeof AppAliasesRoute
@@ -182,6 +191,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/security'
     | '/upgrades'
+    | '/verify'
     | '/v2'
     | '/admin'
     | '/aliases'
@@ -200,6 +210,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/security'
     | '/upgrades'
+    | '/verify'
     | '/v2'
     | '/admin'
     | '/aliases'
@@ -220,6 +231,7 @@ export interface FileRouteTypes {
     | '/privacy'
     | '/security'
     | '/upgrades'
+    | '/verify'
     | '/v2'
     | '/_app/admin'
     | '/_app/aliases'
@@ -241,6 +253,7 @@ export interface RootRouteChildren {
   PrivacyRoute: typeof PrivacyRoute
   SecurityRoute: typeof SecurityRoute
   UpgradesRoute: typeof UpgradesRoute
+  VerifyRoute: typeof VerifyRoute
   V2Route: typeof V2Route
 }
 
@@ -258,6 +271,13 @@ declare module '@tanstack/react-router' {
       path: '/upgrades'
       fullPath: '/upgrades'
       preLoaderRoute: typeof UpgradesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify': {
+      id: '/verify'
+      path: '/verify'
+      fullPath: '/verify'
+      preLoaderRoute: typeof VerifyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/security': {
@@ -419,6 +439,7 @@ const rootRouteChildren: RootRouteChildren = {
   PrivacyRoute: PrivacyRoute,
   SecurityRoute: SecurityRoute,
   UpgradesRoute: UpgradesRoute,
+  VerifyRoute: VerifyRoute,
   V2Route: V2Route,
 }
 export const routeTree = rootRouteImport
