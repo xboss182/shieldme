@@ -298,6 +298,7 @@ describe('forwarding worker — outbound provider', () => {
     expect(forwarded).toContain('<banner/>');
     expect(forwarded).toContain('[banner] ');
     expect(forwarded).toContain('Content-Type: message/rfc822');
+    expect(forwarded).toContain('Content-Disposition: attachment; filename="forwarded-message.eml"');
     expect(forwarded).toContain('Content-Disposition: inline; filename="logo.png"');
     const nestedAt = message.raw.indexOf(rawMessage);
     expect(nestedAt).toBeGreaterThanOrEqual(0);

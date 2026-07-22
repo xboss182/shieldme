@@ -101,7 +101,8 @@ export function buildRawForwardedMessage(input: {
     `--${alternativeBoundary}--`,
     `--${outerBoundary}`,
     'Content-Type: message/rfc822',
-    'Content-Disposition: inline; filename="forwarded-message.eml"',
+    'Content-Disposition: attachment; filename="forwarded-message.eml"',
+    '',
     '',
   ].join('\r\n'), 'utf8');
   const suffix = Buffer.from(`\r\n--${outerBoundary}--\r\n`, 'ascii');

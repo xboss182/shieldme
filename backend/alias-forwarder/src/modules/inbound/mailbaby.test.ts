@@ -43,6 +43,7 @@ vi.mock('../../lib/redis.js', () => ({
 }));
 
 import nodemailer from 'nodemailer';
+import { simpleParser } from 'mailparser';
 import { isMailBabyConfigured, isMailBabyCircuitOpen, recordMailBabyFailure, recordMailBabySuccess, sendViaMailBaby, MailBabyError } from './mailbaby.service.js';
 import { buildRawForwardedMessage } from '../../lib/forwarded-message.js';
 
@@ -159,7 +160,11 @@ describe('MailBaby adapter', () => {
     expect(raw.toString('utf8')).toContain('<div>Forwarded from alias@shieldme.cc</div>');
     const nestedAt = raw.indexOf(original);
     expect(nestedAt).toBeGreaterThanOrEqual(0);
+    expect(raw.toString('latin1')).toContain(`Content-Disposition: attachment; filename="forwarded-message.eml"\r\n\r\n${original.toString('latin1')}`);
     expect(raw.subarray(nestedAt, nestedAt + original.length)).toEqual(original);
+    const parsed = await simpleParser(raw);
+    const nested = parsed.attachments.find(({ contentType, filename }) => contentType === 'message/rfc822' && filename === 'forwarded-message.eml');
+    expect(nested?.content).toEqual(original);
     expect(buildRawForwardedMessage(input)).toEqual(raw);
     expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({
       raw,
