@@ -192,11 +192,18 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
     enabled: !['0', 'false', 'no'].includes(env.TRACKING_PROTECTION_ENABLED.toLowerCase()),
     mode: env.TRACKING_PROTECTION_MODE,
   });
-  const trackingNotice = trackingProtection.metadata.enabled
+  const rawMimeForward = effectiveProvider === 'mailbaby' && Boolean(payload.rawMessageBase64);
+  const effectiveTrackingProtection = {
+    ...trackingProtection.metadata,
+    enabled: rawMimeForward ? false : trackingProtection.metadata.enabled,
+    pixelsRemoved: rawMimeForward ? 0 : trackingProtection.metadata.pixelsRemoved,
+    linksRewritten: rawMimeForward ? 0 : trackingProtection.metadata.linksRewritten,
+  };
+  const trackingNotice = effectiveTrackingProtection.enabled
     ? {
         enabled: true,
-        pixelsRemoved: trackingProtection.metadata.pixelsRemoved,
-        linksRewritten: trackingProtection.metadata.linksRewritten,
+        pixelsRemoved: effectiveTrackingProtection.pixelsRemoved,
+        linksRewritten: effectiveTrackingProtection.linksRewritten,
       }
     : undefined;
   const bannerOpts = { matchedAlias: log.envelopeTo, dashboardUrl, trackingProtection: trackingNotice };
@@ -240,10 +247,10 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   };
   if (log.externalMessageId) headers['X-Original-Message-Id'] = headerValue(log.externalMessageId);
   if (pgpEncrypted) headers['X-PGP-Encrypted'] = 'true';
-  if (trackingProtection.metadata.enabled) {
+  if (effectiveTrackingProtection.enabled) {
     headers['X-ShieldMe-Tracking-Protection'] = 'enabled';
-    headers['X-ShieldMe-Tracking-Pixels-Removed'] = String(trackingProtection.metadata.pixelsRemoved);
-    headers['X-ShieldMe-Tracking-Links-Rewritten'] = String(trackingProtection.metadata.linksRewritten);
+    headers['X-ShieldMe-Tracking-Pixels-Removed'] = String(effectiveTrackingProtection.pixelsRemoved);
+    headers['X-ShieldMe-Tracking-Links-Rewritten'] = String(effectiveTrackingProtection.linksRewritten);
   }
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
@@ -294,6 +301,9 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
         originalMessageId: log.externalMessageId ?? undefined,
         messageId: `<${hashBounceToken(bounceToken ?? logId)}@${platformDomain}>`,
         messageDomain: platformDomain,
+        date: log.createdAt instanceof Date ? log.createdAt : new Date(0),
+        bannerText,
+        bannerHtml,
         headers,
       });
     } catch {
@@ -378,7 +388,7 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
     throw err;
   }
 
-  await db.update(mailLogs).set({ status: 'delivered', resendMessageId: customSmtp ? null : outboundMessageId, providerMessageId: outboundMessageId, outboundProvider: customSmtp ? 'custom_smtp' : effectiveProvider, smtpResponseClass: customSmtp ? '2xx' : null, attemptCount: job.attemptsMade + 1, trackingProtection: trackingProtection.metadata, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
+  await db.update(mailLogs).set({ status: 'delivered', resendMessageId: customSmtp ? null : outboundMessageId, providerMessageId: outboundMessageId, outboundProvider: customSmtp ? 'custom_smtp' : effectiveProvider, smtpResponseClass: customSmtp ? '2xx' : null, attemptCount: job.attemptsMade + 1, trackingProtection: effectiveTrackingProtection, updatedAt: new Date() }).where(eq(mailLogs.id, logId));
   if (!customSmtp && effectiveProvider === 'mailbaby') {
     try {
       await recordMailBabySuccess();

@@ -182,6 +182,7 @@ function makeLog() {
     envelopeFrom: 'sender@sender.com',
     envelopeTo: 'hello@example.com',
     externalMessageId: 'ext-msg-1',
+    createdAt: new Date('2026-07-22T00:00:00Z'),
   };
 }
 
@@ -287,13 +288,23 @@ describe('forwarding worker — outbound provider', () => {
     expect(policy.pinnedProvider).toBe('mailbaby');
     expect(message.envelopeFrom).toMatch(/^b\+[a-f0-9]{64}@sm-bounces\.shieldme\.cc$/);
     expect(message.raw).toEqual(expect.any(Buffer));
-    expect(message.raw.toString('latin1')).toContain('From: "sender sender.com via ShieldMe" <forwarded+hello@shieldme.cc>');
-    expect(message.raw.toString('latin1')).toContain('Reply-To: sender@sender.com');
-    expect(message.raw.toString('latin1')).toMatch(/Message-ID: <[a-f0-9]{64}@shieldme\.cc>/);
-    expect(message.raw.toString('latin1')).toContain('X-ShieldMe-Original-DKIM: removed-after-rewrite');
-    expect(message.raw.toString('latin1')).toMatch(/X-ShieldMe-Original-SHA256: [a-f0-9]{64}/);
-    expect(message.raw.toString('latin1')).toContain('Content-Disposition: inline; filename="logo.png"');
-    expect(message.raw.subarray(message.raw.indexOf('\r\n\r\n') + 4)).toEqual(rawMessage.subarray(rawMessage.indexOf('\r\n\r\n') + 4));
+    const forwarded = message.raw.toString('latin1');
+    expect(forwarded).toContain('From: "sender sender.com via ShieldMe" <forwarded+hello@shieldme.cc>');
+    expect(forwarded).toContain('Reply-To: sender@sender.com');
+    expect(forwarded).toContain('Date: Wed, 22 Jul 2026 00:00:00 GMT');
+    expect(forwarded).toMatch(/Message-ID: <[a-f0-9]{64}@shieldme\.cc>/);
+    expect(forwarded).toContain('X-ShieldMe-Original-DKIM: nested-original-not-valid-for-forward');
+    expect(forwarded).toMatch(/X-ShieldMe-Original-SHA256: [a-f0-9]{64}/);
+    expect(forwarded).toContain('<banner/>');
+    expect(forwarded).toContain('[banner] ');
+    expect(forwarded).toContain('Content-Type: message/rfc822');
+    expect(forwarded).toContain('Content-Disposition: inline; filename="logo.png"');
+    const nestedAt = message.raw.indexOf(rawMessage);
+    expect(nestedAt).toBeGreaterThanOrEqual(0);
+    expect(message.raw.subarray(nestedAt, nestedAt + rawMessage.length)).toEqual(rawMessage);
+    expect(message.headers).not.toHaveProperty('X-ShieldMe-Tracking-Protection');
+    expect(message.headers).not.toHaveProperty('X-ShieldMe-Tracking-Pixels-Removed');
+    expect(message.headers).not.toHaveProperty('X-ShieldMe-Tracking-Links-Rewritten');
     expect(mockRecordMailBabySuccess).toHaveBeenCalledOnce();
   });
 

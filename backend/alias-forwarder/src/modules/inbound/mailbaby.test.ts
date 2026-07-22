@@ -139,16 +139,28 @@ describe('MailBaby adapter', () => {
   it('sends the final rewritten RFC 822 bytes for MailBaby DKIM signing', async () => {
     configureMailBaby();
     mockSendMail.mockResolvedValue({ messageId: '<mb-raw@relay.mailbaby.net>' });
-    const raw = buildRawForwardedMessage({
-      rawMessage: Buffer.from('Content-Type: multipart/mixed; boundary="part"\r\n\r\n--part\r\nContent-Type: text/plain\r\n\r\nHi\r\n--part--\r\n'),
+    const original = Buffer.from('Content-Type: multipart/mixed; boundary="part"\r\n\r\n--part\r\nContent-Type: text/plain\r\n\r\nHi\r\n--part--\r\n');
+    const input = {
+      rawMessage: original,
       from: PAYLOAD.from,
       to: PAYLOAD.to,
       subject: PAYLOAD.subject,
       messageDomain: 'shieldme.cc',
-    });
+      date: new Date('2026-07-22T00:00:00Z'),
+      bannerText: '[Forwarded from alias@shieldme.cc]\n---\n',
+      bannerHtml: '<div>Forwarded from alias@shieldme.cc</div>',
+    };
+    const raw = buildRawForwardedMessage(input);
 
     await sendViaMailBaby({ ...PAYLOAD, raw });
 
+    expect(raw.toString('utf8')).toContain('Date: Wed, 22 Jul 2026 00:00:00 GMT');
+    expect(raw.toString('utf8')).toContain('Content-Type: message/rfc822');
+    expect(raw.toString('utf8')).toContain('<div>Forwarded from alias@shieldme.cc</div>');
+    const nestedAt = raw.indexOf(original);
+    expect(nestedAt).toBeGreaterThanOrEqual(0);
+    expect(raw.subarray(nestedAt, nestedAt + original.length)).toEqual(original);
+    expect(buildRawForwardedMessage(input)).toEqual(raw);
     expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({
       raw,
       envelope: { from: PAYLOAD.envelopeFrom, to: [PAYLOAD.to] },
