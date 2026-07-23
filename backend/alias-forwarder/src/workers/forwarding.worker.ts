@@ -20,15 +20,39 @@ import { recordTtiForwarded } from '../modules/tti/tti.service.js';
 import { assertByoSmtpPilotQuota, buildBounceToken, hashBounceToken, recordCustomSmtpFailure, recordCustomSmtpSuccess, resolveCustomSmtpDelivery } from '../modules/smtp-relays/service.js';
 import { sendSmtpRelayMessage } from '../modules/smtp-relays/transport.js';
 import { acquireRelaySlot } from '../modules/smtp-relays/concurrency.js';
-import { rewriteRawForwardMessage } from '../modules/inbound/raw-forward-message.js';
+import { rewriteRawForwardMessage, type RawForwardMessageResult } from '../modules/inbound/raw-forward-message.js';
 import { relayFailuresTotal, relayMetrics, relayMetricsContentType, relayQueueWaitSeconds, relayRetriesTotal, relaySubmissionsTotal } from '../modules/smtp-relays/metrics.js';
 import { configureRelayKmsFromEnv } from '../modules/smtp-relays/local-kms.js';
 
 configureRelayKmsFromEnv();
 
-function replyToFromEnvelope(value: string): string | undefined {
+// Freemail domains whose Reply-To triggers FROM_AND_AUTH_AND_REPLYTO_DO_NOT_MATCH
+// on MailBaby's outbound spam filter. Strip for these to avoid the +4 penalty.
+const FREEMAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com',
+  'yahoo.com', 'yahoo.co.uk', 'yahoo.com.au', 'yahoo.fr', 'yahoo.de', 'yahoo.it',
+  'yahoo.es', 'yahoo.ca', 'yahoo.co.in', 'yahoo.co.nz', 'ymail.com',
+  'hotmail.com', 'hotmail.co.uk', 'hotmail.fr', 'hotmail.de', 'hotmail.it',
+  'hotmail.es', 'hotmail.com.au',
+  'outlook.com', 'outlook.com.au', 'live.com', 'live.co.uk', 'live.fr',
+  'msn.com',
+  'icloud.com', 'me.com', 'mac.com',
+  'aol.com',
+  'protonmail.com', 'proton.me',
+  'mail.com',
+]);
+
+function extractDomain(address: string): string {
+  const match = address.match(/@([^\s<>@"]+)>?\s*$/);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function replyToFromEnvelope(value: string, forMailBaby = false): string | undefined {
   const mailbox = value.trim();
-  return /^[^\s<>@\"]+@[^\s<>@\"]+\.[^\s<>@\"]+$/.test(mailbox) ? mailbox : undefined;
+  if (!/^[^\s<>@\"]+@[^\s<>@\"]+\.[^\s<>@\"]+$/.test(mailbox)) return undefined;
+  // For MailBaby relay: suppress Reply-To for freemail senders to avoid spam penalty
+  if (forMailBaby && FREEMAIL_DOMAINS.has(extractDomain(mailbox))) return undefined;
+  return mailbox;
 }
 
 function smtpForwardFrom(value: string, identity: string): string {
@@ -170,7 +194,8 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
 
   const originalFrom = payload.originalFrom ?? log.envelopeFrom;
-  const forwardFrom = `ShieldMe <forwarded+${alias.localPart}@${platformDomain}>`;
+  const forwardIdentity = `forwarded+${alias.localPart}@${platformDomain}`;
+  const forwardFrom = smtpForwardFrom(originalFrom, forwardIdentity);
 
   const spamScan = payload.spamScan as SpamScanMetadata | undefined;
   const baseSubject = payload.subject ?? `[Forwarded] Message to ${log.envelopeTo}`;
@@ -245,19 +270,35 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
   if (spamScan) Object.assign(headers, buildSpamHeaders(spamScan));
 
-  const rawMessage = payload.rawMessage && pgpMode === 'none'
+  const isMailBaby = !customSmtp && effectiveProvider === 'mailbaby';
+  const trackingConfig = {
+    enabled: !['0', 'false', 'no'].includes(env.TRACKING_PROTECTION_ENABLED.toLowerCase()),
+    mode: env.TRACKING_PROTECTION_MODE,
+  };
+
+  const rawResult: RawForwardMessageResult | undefined = payload.rawMessage && pgpMode === 'none'
     ? rewriteRawForwardMessage({
         rawMessage: Buffer.from(payload.rawMessage, 'base64'),
         from: forwardFrom,
         to: recipient.email,
-        replyTo: replyToFromEnvelope(originalFrom),
+        replyTo: replyToFromEnvelope(originalFrom, isMailBaby),
         originalFrom,
         originalMessageId: log.externalMessageId,
         forwardedAlias: log.envelopeTo,
         messageIdDomain: platformDomain,
         headers,
+        trackingProtection: trackingConfig,
+        bannerHtml,
+        bannerText,
       })
     : undefined;
+  const rawMessage = rawResult?.message;
+  // Merge raw-message tracking metadata into tracking headers if applicable
+  if (rawResult?.trackingMetadata.enabled) {
+    headers['X-ShieldMe-Tracking-Protection'] = 'enabled';
+    headers['X-ShieldMe-Tracking-Pixels-Removed'] = String(rawResult.trackingMetadata.pixelsRemoved);
+    headers['X-ShieldMe-Tracking-Links-Rewritten'] = String(rawResult.trackingMetadata.linksRewritten);
+  }
   if (!customSmtp && effectiveProvider === 'mailbaby' && !rawMessage && pgpMode === 'none') {
     await db.update(mailLogs).set({
       status: 'failed',

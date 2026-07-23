@@ -236,7 +236,7 @@ describe('forwarding worker — outbound provider', () => {
     expect(mockSendOutbound).toHaveBeenCalledOnce();
     const [payload, policyCall] = mockSendOutbound.mock.calls[0];
     expect(policyCall.pinnedProvider).toBe('mailbaby');
-    expect(payload.from).toBe('ShieldMe <forwarded+hello@shieldme.cc>');
+    expect(payload.from).toBe('"sender sender.com via ShieldMe" <forwarded+hello@shieldme.cc>');
     expect(payload.envelopeFrom).toMatch(/^b\+[a-f0-9]{64}@sm-bounces\.shieldme\.cc$/);
     expect(payload.replyTo).toBe('sender@sender.com');
     expect(payload.rawMessage.toString('latin1')).toContain('X-Forwarded-For-Alias: hello@example.com');
