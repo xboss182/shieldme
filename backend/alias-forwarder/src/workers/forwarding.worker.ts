@@ -21,6 +21,7 @@ import { assertByoSmtpPilotQuota, buildBounceToken, hashBounceToken, recordCusto
 import { sendSmtpRelayMessage } from '../modules/smtp-relays/transport.js';
 import { acquireRelaySlot } from '../modules/smtp-relays/concurrency.js';
 import { rewriteRawForwardMessage, type RawForwardMessageResult } from '../modules/inbound/raw-forward-message.js';
+import { mintReverseReplyToken } from '../modules/inbound/reverse-reply.service.js';
 import { relayFailuresTotal, relayMetrics, relayMetricsContentType, relayQueueWaitSeconds, relayRetriesTotal, relaySubmissionsTotal } from '../modules/smtp-relays/metrics.js';
 import { configureRelayKmsFromEnv } from '../modules/smtp-relays/local-kms.js';
 
@@ -194,7 +195,22 @@ async function processForwardingJob(job: Job<EmailForwardingJob>) {
   }
 
   const originalFrom = payload.originalFrom ?? log.envelopeFrom;
-  const forwardIdentity = `forwarded+${alias.localPart}@${platformDomain}`;
+  // Reverse-reply From (MNC-708 Stage 1). When INBOUND_REPLY_ENABLED, mint an
+  // opaque per-forward token bound to {aliasId, originalSender} and embed it as
+  // `forwarded+<token>@<platform>`; an inbound reply to that address is resolved
+  // back to this binding by the SMTP reverse-reply branch. Flag off keeps the
+  // legacy `forwarded+<localPart>` identity, a clean revert to Phase 1 behavior.
+  // Token minting is best-effort: a failure must never block the forward, so we
+  // fall back to the legacy identity on error.
+  let forwardIdentity = `forwarded+${alias.localPart}@${platformDomain}`;
+  if (env.INBOUND_REPLY_ENABLED) {
+    try {
+      const replyToken = await mintReverseReplyToken({ aliasId: alias.id, originalSender: originalFrom });
+      forwardIdentity = `forwarded+${replyToken}@${platformDomain}`;
+    } catch (err) {
+      logger.warn({ logId, aliasId, err: err instanceof Error ? err.message : String(err) }, 'reverse_reply_token_mint_failed — falling back to legacy forward identity');
+    }
+  }
   const forwardFrom = smtpForwardFrom(originalFrom, forwardIdentity);
 
   const spamScan = payload.spamScan as SpamScanMetadata | undefined;
