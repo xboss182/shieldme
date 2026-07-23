@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { protectEmailTracking, type TrackingProtectionConfig, type TrackingProtectionMetadata } from '../tracking/tracking-protection.service.js';
 
 export type RawForwardingMessageOptions = {
   rawMessage: Buffer;
@@ -10,6 +11,7 @@ export type RawForwardingMessageOptions = {
   forwardedAlias: string;
   messageIdDomain: string;
   headers?: Record<string, string>;
+  trackingProtection?: TrackingProtectionConfig;
 };
 
 type HeaderBlock = { name: string; value: string };
@@ -35,6 +37,51 @@ const strippedHeaders = new Set([
   'x-original-message-id',
   'x-original-sender',
 ]);
+
+export type RawTrackingResult = {
+  body: Buffer;
+  metadata: TrackingProtectionMetadata;
+};
+
+/**
+ * Apply tracking protection to the HTML parts of a raw MIME body.
+ * Handles both single-part text/html and multipart bodies with html parts.
+ * Returns the modified body buffer and aggregated metadata.
+ */
+function applyTrackingProtectionToBody(body: Buffer, config: TrackingProtectionConfig): RawTrackingResult {
+  if (!config.enabled) {
+    return { body, metadata: { enabled: false, mode: config.mode, pixelsRemoved: 0, linksRewritten: 0 } };
+  }
+
+  // Work on latin1 string so byte positions are preserved
+  const raw = body.toString('latin1');
+
+  // Match HTML part content between MIME boundaries or in a single-part body.
+  // We look for Content-Type: text/html (possibly with charset) followed by blank line + content.
+  const htmlPartRe = /(Content-Type:\s*text\/html[^\r\n]*(?:\r?\n[^\r\n:]+)*\r?\n(?:[^\r\n]+:\s*[^\r\n]*\r?\n)*\r?\n)([\s\S]*?)(?=\r?\n--|\r?\n$|$)/gi;
+
+  let totalPixelsRemoved = 0;
+  let totalLinksRewritten = 0;
+  let result = raw;
+
+  result = result.replace(htmlPartRe, (match, partHeaders, partBody) => {
+    const protected_ = protectEmailTracking(partBody, config);
+    totalPixelsRemoved += protected_.metadata.pixelsRemoved;
+    totalLinksRewritten += protected_.metadata.linksRewritten;
+    return partHeaders + protected_.html;
+  });
+
+  return {
+    body: Buffer.from(result, 'latin1'),
+    metadata: {
+      enabled: true,
+      mode: config.mode,
+      pixelsRemoved: totalPixelsRemoved,
+      linksRewritten: totalLinksRewritten,
+    },
+  };
+}
+
 
 function splitMessage(rawMessage: Buffer) {
   const crlf = rawMessage.indexOf(Buffer.from('\r\n\r\n'));
@@ -78,14 +125,24 @@ function extraHeaders(headers: Record<string, string> | undefined): string[] {
   });
 }
 
-export function rewriteRawForwardMessage(options: RawForwardingMessageOptions): Buffer {
-  const { header, body } = splitMessage(options.rawMessage);
+export type RawForwardMessageResult = {
+  message: Buffer;
+  trackingMetadata: TrackingProtectionMetadata;
+};
+
+export function rewriteRawForwardMessage(options: RawForwardingMessageOptions): RawForwardMessageResult {
+  const { header, body: rawBody } = splitMessage(options.rawMessage);
   const preserved = parseHeaders(header)
     .filter(({ name }) => !unsafeHeader(name) && !name.startsWith('x-shieldme-'))
     .map(({ value }) => value);
   const originalFrom = headerValue(options.originalFrom ?? 'unknown');
   const originalMessageId = options.originalMessageId ? headerValue(options.originalMessageId) : undefined;
   const messageId = `<forward-${randomUUID()}@${headerValue(options.messageIdDomain)}>`;
+
+  // Apply tracking protection to the body if configured
+  const trackingConfig = options.trackingProtection ?? { enabled: false, mode: 'conservative' as const };
+  const { body, metadata: trackingMetadata } = applyTrackingProtectionToBody(rawBody, trackingConfig);
+
   const rewritten = [
     `From: ${headerValue(options.from)}`,
     `To: ${headerValue(options.to)}`,
@@ -97,5 +154,6 @@ export function rewriteRawForwardMessage(options: RawForwardingMessageOptions): 
     ...extraHeaders(options.headers),
     ...preserved,
   ].join('\r\n');
-  return Buffer.concat([Buffer.from(`${rewritten}\r\n\r\n`, 'latin1'), body]);
+  const message = Buffer.concat([Buffer.from(`${rewritten}\r\n\r\n`, 'latin1'), body]);
+  return { message, trackingMetadata };
 }

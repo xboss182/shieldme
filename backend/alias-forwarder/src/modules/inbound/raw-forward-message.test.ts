@@ -33,7 +33,7 @@ const source = Buffer.from([
 
 describe('rewriteRawForwardMessage', () => {
   it('preserves multipart bytes, attachments, inline CID, and thread headers while replacing unsafe identity headers', () => {
-    const rewritten = rewriteRawForwardMessage({
+    const result = rewriteRawForwardMessage({
       rawMessage: source,
       from: 'ShieldMe <forwarded+alias@shieldme.cc>',
       to: 'owner@example.net',
@@ -44,6 +44,7 @@ describe('rewriteRawForwardMessage', () => {
       messageIdDomain: 'shieldme.cc',
       headers: { 'X-ShieldMe-Spam-Status': 'No' },
     });
+    const rewritten = result.message;
     const separator = rewritten.indexOf(Buffer.from('\r\n\r\n'));
     const headers = rewritten.subarray(0, separator).toString('latin1');
     const body = rewritten.subarray(separator + 4);
