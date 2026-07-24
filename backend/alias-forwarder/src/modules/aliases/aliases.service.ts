@@ -224,13 +224,15 @@ export async function updateAlias(ownerId: string, aliasId: string, input: Updat
 }
 
 export async function getAliasVerificationCode(ownerId: string, aliasId: string) {
-  if (!env.VERIFY_ENABLED) throw new AliasError('Verification is unavailable', 404);
+  // Gate behind INBOUND_REPLY_ENABLED (MNC-712).
+  if (!env.INBOUND_REPLY_ENABLED) throw new AliasError('Verification code surfacing is unavailable', 404);
   const alias = await db.query.aliases.findFirst({
     where: and(eq(aliases.id, aliasId), eq(aliases.ownerId, ownerId)),
   });
   if (!alias) throw new AliasError('Alias not found', 404);
-  const { getVerifyCodeForAlias } = await import('../verify/verify.service.js');
-  return getVerifyCodeForAlias(alias.id);
+  const { fetchGmailSendAsCode } = await import('../inbound/gmail-send-as.js');
+  const code = await fetchGmailSendAsCode(alias.id);
+  return code;
 }
 
 export async function listAliases(ownerId: string) {

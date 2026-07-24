@@ -3,6 +3,7 @@ import { db } from '../../db/client.js';
 import { aliases, domains, mailLogs, users } from '../../db/schema.js';
 import { buildEncryptedEmailForwardingJob, emailForwardingQueue } from '../../queues/email-jobs.js';
 import { logger } from '../../lib/logger.js';
+import { env } from '../../config/env.js';
 import { getOutboundProvider, getPlatformDomain } from '../../config/runtime-config.js';
 import { assertCustomRelayCanAccept, SmtpRelayError } from '../smtp-relays/service.js';
 import {
@@ -16,6 +17,7 @@ import {
 } from '../abuse/abuse.service.js';
 import { isForwardingEnabled } from '../../config/runtime-config.js';
 import { scanInboundMail } from '../spam/spam-scanner.service.js';
+import { detectGmailSendAs, storeGmailSendAsCode } from './gmail-send-as.js';
 
 export class InboundError extends Error {
   constructor(message: string, public statusCode = 550) {
@@ -281,6 +283,36 @@ export async function handleInbound(
     spamCategory: spamScan.category,
     spamAction: spamScan.action,
   };
+
+  // ── Gmail Send-As verification code detection (MNC-712) ──────────────────
+  // Gate behind INBOUND_REPLY_ENABLED. When the inbound email is a Gmail
+  // Send-As confirmation, store only the numeric code in Redis (no body)
+  // and then intercept — it does not need to be forwarded to the recipient.
+  if (env.INBOUND_REPLY_ENABLED) {
+    const detection = detectGmailSendAs({
+      from: envelope.from,
+      subject: envelope.subject,
+      textBody: envelope.textBody,
+    });
+    if (detection.isGmailSendAs) {
+      if (detection.code) {
+        await storeGmailSendAsCode(alias.id, detection.code);
+      }
+      // Log as delivered (code surfaced); no forwarding needed.
+      const [interceptLog] = await insertMailLog({
+        ...baseLog,
+        ...spamLogFields,
+        aliasId: alias.id,
+        outboundRouteMode: 'platform',
+        forwardedTo: null,
+        status: 'delivered',
+        rejectionReason: null,
+      });
+      logger.info({ aliasId: alias.id, hasCode: Boolean(detection.code) }, 'gmail-send-as: verification email intercepted, code stored');
+      return { jobId: 'gmail-send-as-intercepted', logId: interceptLog?.id ?? '' };
+    }
+  }
+
   if (spamScan.action === 'reject' || spamScan.action === 'quarantine') {
     await insertMailLog({ ...baseLog, ...spamLogFields, aliasId: alias.id, status: 'rejected', rejectionReason: `spam_${spamScan.action}` });
     throw new InboundError(spamScan.action === 'quarantine' ? 'Message quarantined by spam policy' : 'Message rejected by spam policy');
