@@ -75,6 +75,8 @@ const envSchema = z.object({
   // Max inbound message size (bytes) accepted on the reverse-reply branch.
   // Oversized => silent drop + metadata log (fail-closed). Default 25 MB.
   INBOUND_REPLY_MAX_MESSAGE_BYTES: z.coerce.number().int().min(1).default(25 * 1024 * 1024),
+  // Stage 3 (MNC-712): TTL (seconds) for Gmail Send-As verification codes stored in Redis (default 30 min)
+  GMAIL_SEND_AS_CODE_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(1800),
 }).superRefine((value, ctx) => {
   if (value.VERIFY_ENABLED) {
     for (const key of ['TRANSPARENCY_SIGNING_PRIVATE_KEY', 'TRANSPARENCY_SIGNING_KEY_ID', 'TRANSPARENCY_VERIFY_CODE_PEPPER'] as const) {
