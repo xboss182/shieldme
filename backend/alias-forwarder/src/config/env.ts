@@ -65,6 +65,10 @@ const envSchema = z.object({
   TRANSPARENCY_SIGNING_KEY_ID: z.string().min(1).max(50).optional(),
   TRANSPARENCY_VERIFY_CODE_PEPPER: z.string().regex(/^[0-9a-f]{64}$/i, 'TRANSPARENCY_VERIFY_CODE_PEPPER must be 32 bytes of hexadecimal').optional(),
   VERIFY_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // Stage 3 (MNC-712): inbound reply / Gmail Send-As verification code surfacing
+  INBOUND_REPLY_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // TTL (seconds) for Gmail Send-As verification codes stored in Redis (default 30 min)
+  GMAIL_SEND_AS_CODE_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(1800),
 }).superRefine((value, ctx) => {
   if (!value.VERIFY_ENABLED) return;
   for (const key of ['TRANSPARENCY_SIGNING_PRIVATE_KEY', 'TRANSPARENCY_SIGNING_KEY_ID', 'TRANSPARENCY_VERIFY_CODE_PEPPER'] as const) {

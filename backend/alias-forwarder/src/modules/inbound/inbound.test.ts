@@ -49,7 +49,7 @@ vi.mock('../../lib/logger.js', () => ({
 }));
 
 vi.mock('../../config/env.js', () => ({
-  env: { PLATFORM_DOMAIN: 'mail.platform.com' },
+  env: { PLATFORM_DOMAIN: 'mail.platform.com', INBOUND_REPLY_ENABLED: false },
 }));
 
 vi.mock('../../config/runtime-config.js', () => ({
