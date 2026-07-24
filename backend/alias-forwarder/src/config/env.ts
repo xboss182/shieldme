@@ -75,6 +75,17 @@ const envSchema = z.object({
   // Max inbound message size (bytes) accepted on the reverse-reply branch.
   // Oversized => silent drop + metadata log (fail-closed). Default 25 MB.
   INBOUND_REPLY_MAX_MESSAGE_BYTES: z.coerce.number().int().min(1).default(25 * 1024 * 1024),
+  // MNC-708 Stage 2: reverse-reply relay controls. All gated by
+  // INBOUND_REPLY_ENABLED; inert when the flag is off.
+  // Max relayed replies per alias per rolling 24h. Default 50.
+  REVERSE_REPLY_MAX_PER_ALIAS_PER_DAY: z.coerce.number().int().min(1).default(50),
+  // Max relayed replies per (alias, original-sender) pair per rolling 24h.
+  // Per-recipient cap so one destination can't be flooded. Default 50.
+  REVERSE_REPLY_MAX_PER_RECIPIENT_PER_DAY: z.coerce.number().int().min(1).default(50),
+  // Max relay hops before a message is treated as a loop and dropped. Our own
+  // X-ShieldMe-Relay marker carries the hop count; a legitimate first reply has
+  // none. Default 1 (any inbound reply already carrying our marker is dropped).
+  REVERSE_REPLY_MAX_HOPS: z.coerce.number().int().min(1).default(1),
 }).superRefine((value, ctx) => {
   if (value.VERIFY_ENABLED) {
     for (const key of ['TRANSPARENCY_SIGNING_PRIVATE_KEY', 'TRANSPARENCY_SIGNING_KEY_ID', 'TRANSPARENCY_VERIFY_CODE_PEPPER'] as const) {
