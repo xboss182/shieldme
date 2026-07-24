@@ -174,9 +174,13 @@ function applyBodyTransforms(
 }
 
 export function rewriteRawForwardMessage(options: RawForwardingMessageOptions): RawForwardMessageResult {
+  const overrideNames = new Set(
+    Object.keys(options.headers ?? {}).map((k) => k.toLowerCase()),
+  );
+
   const { header, body: rawBody } = splitMessage(options.rawMessage);
   const preserved = parseHeaders(header)
-    .filter(({ name }) => !unsafeHeader(name) && !name.startsWith('x-shieldme-'))
+    .filter(({ name }) => !unsafeHeader(name) && !name.startsWith('x-shieldme-') && !overrideNames.has(name))
     .map(({ value }) => value);
   const originalFrom = headerValue(options.originalFrom ?? 'unknown');
   const originalMessageId = options.originalMessageId ? headerValue(options.originalMessageId) : undefined;

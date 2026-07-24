@@ -71,4 +71,22 @@ describe('rewriteRawForwardMessage', () => {
     expect(body.toString('latin1')).toContain('Content-ID: <logo@sender.test>');
     expect(body.toString('latin1')).toContain('AAECA/8=');
   });
+
+  it('deduplicates override headers passed in options.headers when present in rawMessage', () => {
+    const result = rewriteRawForwardMessage({
+      rawMessage: source,
+      from: 'ShieldMe <forwarded+alias@shieldme.cc>',
+      to: 'owner@example.net',
+      forwardedAlias: 'alias@shieldme.cc',
+      messageIdDomain: 'shieldme.cc',
+      headers: {
+        'In-Reply-To': '<override-parent@sender.test>',
+      },
+    });
+    const rewritten = result.message.toString('latin1');
+    const matches = rewritten.match(/^In-Reply-To:/gm);
+    expect(matches?.length).toBe(1);
+    expect(rewritten).toContain('In-Reply-To: <override-parent@sender.test>');
+    expect(rewritten).not.toContain('In-Reply-To: <parent@sender.test>');
+  });
 });
