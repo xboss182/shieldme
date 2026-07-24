@@ -65,10 +65,28 @@ const envSchema = z.object({
   TRANSPARENCY_SIGNING_KEY_ID: z.string().min(1).max(50).optional(),
   TRANSPARENCY_VERIFY_CODE_PEPPER: z.string().regex(/^[0-9a-f]{64}$/i, 'TRANSPARENCY_VERIFY_CODE_PEPPER must be 32 bytes of hexadecimal').optional(),
   VERIFY_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // MNC-708 Stage 1: inbound reverse-reply (forwarded+<token>@<platform>). Dark
+  // by default, mirroring the VERIFY_ENABLED pattern. Off => forwarded+… mail
+  // falls through to today's alias_not_found behavior (clean revert to Phase 1).
+  INBOUND_REPLY_ENABLED: z.enum(['true', 'false']).default('false').transform((v) => v === 'true'),
+  // Lifetime of a reverse-reply token, in minutes. Bounds how long a reply may
+  // arrive after the original forward. Default 30 days.
+  INBOUND_REPLY_TOKEN_TTL_MINUTES: z.coerce.number().int().min(1).default(43_200),
+  // Max inbound message size (bytes) accepted on the reverse-reply branch.
+  // Oversized => silent drop + metadata log (fail-closed). Default 25 MB.
+  INBOUND_REPLY_MAX_MESSAGE_BYTES: z.coerce.number().int().min(1).default(25 * 1024 * 1024),
 }).superRefine((value, ctx) => {
-  if (!value.VERIFY_ENABLED) return;
-  for (const key of ['TRANSPARENCY_SIGNING_PRIVATE_KEY', 'TRANSPARENCY_SIGNING_KEY_ID', 'TRANSPARENCY_VERIFY_CODE_PEPPER'] as const) {
-    if (!value[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when VERIFY_ENABLED=true` });
+  if (value.VERIFY_ENABLED) {
+    for (const key of ['TRANSPARENCY_SIGNING_PRIVATE_KEY', 'TRANSPARENCY_SIGNING_KEY_ID', 'TRANSPARENCY_VERIFY_CODE_PEPPER'] as const) {
+      if (!value[key]) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: `${key} is required when VERIFY_ENABLED=true` });
+    }
+  }
+  // Reply-path config required-when-enabled: the reverse-reply From is emitted
+  // through the platform relay, so a platform domain must be resolvable. The
+  // outbound relay itself is Stage 2 (MNC-711); here we only guard the pieces
+  // Stage 1 depends on.
+  if (value.INBOUND_REPLY_ENABLED && !value.PLATFORM_DOMAIN) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['PLATFORM_DOMAIN'], message: 'PLATFORM_DOMAIN is required when INBOUND_REPLY_ENABLED=true' });
   }
 });
 

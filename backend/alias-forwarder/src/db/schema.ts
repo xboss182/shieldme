@@ -458,3 +458,21 @@ export const providerTransparencyProfiles = pgTable('provider_transparency_profi
   effectiveAt: timestamp('effective_at', { withTimezone: true }).notNull().defaultNow(),
   retiredAt: timestamp('retired_at', { withTimezone: true }),
 });
+
+// ── Reverse-reply tokens (MNC-708 Stage 1) ───────────────────────────────────
+// Opaque token minted at forward time and embedded in the outbound
+// `forwarded+<token>@<platform-domain>` From address. Bound to the receiving
+// alias and the original sender so an inbound reply can be resolved back to its
+// {alias_id, original_sender} pair. The raw token is NEVER stored — only its
+// SHA-256 hash, mirroring the bounce-token posture.
+export const reverseReplyTokens = pgTable('reverse_reply_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  tokenHash: text('token_hash').notNull().unique(),
+  aliasId: uuid('alias_id').notNull().references(() => aliases.id, { onDelete: 'cascade' }),
+  originalSender: text('original_sender').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => [
+  index('reverse_reply_tokens_alias_id_idx').on(t.aliasId),
+  index('reverse_reply_tokens_expires_at_idx').on(t.expiresAt),
+]);
