@@ -247,7 +247,8 @@ export function createSmtpServer() {
             });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            logger.warn({ to: rcpt.address, err: msg }, 'Inbound rejected');
+            const from = session.envelope.mailFrom ? session.envelope.mailFrom.address : '';
+            logger.warn({ to: rcpt.address, from, err: msg }, 'Inbound rejected');
             errors.push(msg);
           }
         }
