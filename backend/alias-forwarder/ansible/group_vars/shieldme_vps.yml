@@ -15,7 +15,11 @@ pm2_apps:
   api: alias-forwarder-api
   smtp: alias-forwarder-smtp
   worker: alias-forwarder-worker
+  reverse_reply_worker: alias-forwarder-reverse-reply-worker
   site: shieldme-site
+# MNC-708 Stage 2: reverse-reply relay. Dark by default; flip to "true" only
+# after staging end-to-end validation.
+shieldme_inbound_reply_enabled: false
 caddy_sites:
   root_domains: [shieldme.cc, www.shieldme.cc]
   app_domain: app.shieldme.cc
@@ -46,6 +50,7 @@ shieldme_env_template:
   BYO_SMTP_PILOT_CONCURRENCY: "1"
   RELAY_KMS_SOCKET_PATH: /run/shieldme-relay-kms/kms.sock
   RELAY_METRICS_PORT: "9405"
+  INBOUND_REPLY_ENABLED: "{{ 'true' if shieldme_inbound_reply_enabled | bool else 'false' }}"
   GIT_REVISION: "{{ shieldme_git_revision | default('') }}"
 shieldme_outbound_provider: mailbaby
 shieldme_mailbaby_smtp_username: REPLACE_WITH_VAULTED_SECRET
