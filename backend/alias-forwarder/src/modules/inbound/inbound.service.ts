@@ -18,6 +18,10 @@ import {
 import { isForwardingEnabled } from '../../config/runtime-config.js';
 import { scanInboundMail } from '../spam/spam-scanner.service.js';
 import { detectGmailSendAs, storeGmailSendAsCode } from './gmail-send-as.js';
+import { parseMailAuthResults, countAuthFailures, type MailAuthResults } from './mail-auth-results.js';
+
+// Re-exported for backward compatibility with existing importers.
+export { parseMailAuthResults, type MailAuthResults };
 
 export class InboundError extends Error {
   constructor(message: string, public statusCode = 550) {
@@ -44,14 +48,6 @@ export interface InboundEnvelope {
   rawMessage?: Buffer | string;
 }
 
-export interface MailAuthResults extends Record<string, unknown> {
-  source: 'authentication-results-header' | 'smtp-session-unavailable';
-  spf: 'pass' | 'fail' | 'softfail' | 'neutral' | 'none' | 'temperror' | 'permerror' | 'unknown';
-  dkim: 'pass' | 'fail' | 'neutral' | 'none' | 'temperror' | 'permerror' | 'unknown';
-  dmarc: 'pass' | 'fail' | 'bestguesspass' | 'none' | 'temperror' | 'permerror' | 'unknown';
-  raw?: string;
-}
-
 interface MailLogInsert {
   aliasId?: string | null;
   outboundRouteMode?: 'platform' | 'custom_smtp';
@@ -72,40 +68,6 @@ interface MailLogInsert {
   outboundProvider?: 'mailbaby' | 'resend' | 'ses' | 'custom_smtp' | null;
 }
 
-
-function normalizeHeaderKey(headers: Record<string, string>, key: string): string | undefined {
-  return headers[key] ?? headers[key.toLowerCase()] ?? Object.entries(headers).find(([k]) => k.toLowerCase() === key.toLowerCase())?.[1];
-}
-
-function parseAuthToken(raw: string, token: 'spf' | 'dkim' | 'dmarc'): string {
-  for (const part of raw.split(';')) {
-    const trimmed = part.trim().toLowerCase();
-    if (trimmed.startsWith(`${token}=`)) return trimmed.slice(token.length + 1).split(/\s+/)[0] ?? 'unknown';
-  }
-  return 'unknown';
-}
-
-function countAuthFailures(results: MailAuthResults | null): number {
-  if (!results) return 0;
-  return [results.spf, results.dkim, results.dmarc].filter((value) => ['fail', 'softfail', 'permerror'].includes(value)).length;
-}
-
-export function parseMailAuthResults(headers?: Record<string, string>): { results: MailAuthResults | null; failureCount: number } {
-  const raw = headers ? normalizeHeaderKey(headers, 'Authentication-Results') : undefined;
-  if (!raw) {
-    const results: MailAuthResults = { source: 'smtp-session-unavailable', spf: 'unknown', dkim: 'unknown', dmarc: 'unknown' };
-    return { results, failureCount: 0 };
-  }
-
-  const results: MailAuthResults = {
-    source: 'authentication-results-header',
-    spf: parseAuthToken(raw, 'spf') as MailAuthResults['spf'],
-    dkim: parseAuthToken(raw, 'dkim') as MailAuthResults['dkim'],
-    dmarc: parseAuthToken(raw, 'dmarc') as MailAuthResults['dmarc'],
-    raw: raw.slice(0, 1000),
-  };
-  return { results, failureCount: countAuthFailures(results) };
-}
 
 async function insertMailLog(data: MailLogInsert) {
   return db
