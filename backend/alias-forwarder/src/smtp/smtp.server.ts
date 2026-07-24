@@ -2,9 +2,13 @@ import 'dotenv/config';
 import SMTPServer from 'smtp-server';
 import { simpleParser } from 'mailparser';
 import type { SMTPServerDataStream, SMTPServerSession } from 'smtp-server';
-import { handleInbound } from '../modules/inbound/inbound.service.js';
+import { handleInbound, parseMailAuthResults } from '../modules/inbound/inbound.service.js';
 import { processSmtpBounce } from '../modules/bounces/bounces.service.js';
 import { resolveReverseReplyToken } from '../modules/inbound/reverse-reply.service.js';
+import { validateReverseReplyAuthenticity } from '../modules/inbound/reverse-reply-validation.js';
+import { detectReverseReplyLoop, enforceReverseReplyRateLimit, nextRelayHop } from '../modules/inbound/reverse-reply-guard.js';
+import { isLoopSender } from '../modules/abuse/abuse.service.js';
+import { buildEncryptedReverseReplyJob, reverseReplyQueue } from '../queues/reverse-reply-jobs.js';
 import { logger } from '../lib/logger.js';
 import { env } from '../config/env.js';
 import { getPlatformDomain } from '../config/runtime-config.js';
@@ -27,10 +31,26 @@ const REVERSE_REPLY_LOCAL_PART_REGEX = /^forwarded\+([a-f0-9]{32,128})$/i;
  * silently accept (return true, enqueue nothing) and log metadata only. No
  * bounce, no DSN, no enumeration.
  */
+interface ReverseReplyContext {
+  envelopeFrom: string;
+  rawMessage: Buffer;
+  messageId?: string;
+  subject?: string;
+  textBody?: string;
+  htmlBody?: string;
+  headers?: Record<string, string>;
+}
+
+function getHeader(headers: Record<string, string> | undefined, key: string): string | undefined {
+  if (!headers) return undefined;
+  return headers[key] ?? headers[key.toLowerCase()] ?? Object.entries(headers).find(([k]) => k.toLowerCase() === key.toLowerCase())?.[1];
+}
+
 async function tryHandleReverseReply(
   localPart: string,
   domain: string,
   sizeBytes: number,
+  ctx: ReverseReplyContext,
 ): Promise<boolean> {
   if (!env.INBOUND_REPLY_ENABLED) return false;
 
@@ -62,10 +82,77 @@ async function tryHandleReverseReply(
     return true;
   }
 
-  // Stage 1: resolution + enqueue-point only. The relay (ReverseReplyJob via
-  // MailBaby), sender-authenticity checks, loop prevention, threading, and rate
-  // limits are Stage 2 (MNC-711).
-  logger.info({ event: 'reverse_reply_resolved', aliasId: binding.aliasId }, 'Reverse-reply token resolved (relay deferred to Stage 2)');
+  // ── Loop prevention (Auto-Submitted / bulk / our own relay marker) ────────
+  // Platform-domain senders are our own relayed mail bouncing back — drop.
+  if (isLoopSender(ctx.envelopeFrom, platformDomain)) {
+    logger.warn({ event: 'reverse_reply_dropped', reason: 'loop_sender', aliasId: binding.aliasId }, 'Reverse-reply loop (platform sender) — dropping');
+    return true;
+  }
+  const loopReason = detectReverseReplyLoop(ctx.headers);
+  if (loopReason) {
+    logger.warn({ event: 'reverse_reply_dropped', reason: loopReason, aliasId: binding.aliasId }, 'Reverse-reply loop detected — dropping');
+    return true;
+  }
+
+  // ── Sender authenticity (never trust From alone) ──────────────────────────
+  // Require a genuine mail-auth verdict from our own inbound path (DMARC pass or
+  // DKIM pass) AND that the authenticated domain aligns with the token-bound
+  // verified recipient. Anything short of a clear pass is dropped silently.
+  const auth = parseMailAuthResults(ctx.headers).results;
+  const headerFrom = getHeader(ctx.headers, 'From');
+  const decision = validateReverseReplyAuthenticity({
+    envelopeFrom: ctx.envelopeFrom,
+    headerFrom,
+    headers: ctx.headers,
+    authResults: auth,
+    boundOriginalSender: binding.originalSender,
+  });
+  if (!decision.ok) {
+    logger.warn({ event: 'reverse_reply_auth_failed', reason: decision.reason, aliasId: binding.aliasId }, 'Reverse-reply sender authenticity failed — dropping');
+    return true;
+  }
+
+  // ── Rate limiting (per-alias/day + per-recipient/day) ─────────────────────
+  let rateDrop: Awaited<ReturnType<typeof enforceReverseReplyRateLimit>> = null;
+  try {
+    rateDrop = await enforceReverseReplyRateLimit(binding.aliasId, binding.originalSender);
+  } catch (err) {
+    // Redis failure: fail closed (drop) rather than risk an unbounded relay.
+    logger.warn({ event: 'reverse_reply_dropped', reason: 'rate_limit_error', err: err instanceof Error ? err.message : String(err), aliasId: binding.aliasId }, 'Reverse-reply rate-limit check failed — dropping');
+    return true;
+  }
+  if (rateDrop) {
+    logger.warn({ event: 'reverse_reply_dropped', reason: rateDrop, aliasId: binding.aliasId }, 'Reverse-reply rate limit exceeded — dropping');
+    return true;
+  }
+
+  // ── Enqueue the relay job ────────────────────────────────────────────────
+  try {
+    const job = buildEncryptedReverseReplyJob({
+      tokenId: token,
+      aliasId: binding.aliasId,
+      originalSender: binding.originalSender,
+      replyFrom: ctx.envelopeFrom,
+      rawMessage: ctx.rawMessage.toString('base64'),
+      subject: ctx.subject,
+      textBody: ctx.textBody,
+      htmlBody: ctx.htmlBody,
+      inReplyTo: getHeader(ctx.headers, 'In-Reply-To'),
+      references: getHeader(ctx.headers, 'References'),
+      messageId: ctx.messageId,
+      hop: nextRelayHop(ctx.headers),
+      authResults: decision.authResults as unknown as Record<string, unknown>,
+    });
+    await reverseReplyQueue.add('relay', job, {
+      removeOnComplete: { age: Math.ceil((job.ttl.expiresAt - job.ttl.queuedAt) / 1000), count: 100 },
+      removeOnFail: { age: Math.ceil((job.ttl.expiresAt - job.ttl.queuedAt) / 1000), count: 500 },
+    });
+    logger.info({ event: 'reverse_reply_enqueued', aliasId: binding.aliasId, authenticatedDomain: decision.authenticatedDomain }, 'Reverse-reply validated and enqueued for relay');
+  } catch (err) {
+    // Enqueue failure: accept-and-discard so the sending MTA doesn't retry. The
+    // reply is lost but we never bounce or enumerate.
+    logger.error({ event: 'reverse_reply_enqueue_failed', err: err instanceof Error ? err.message : String(err), aliasId: binding.aliasId }, 'Reverse-reply enqueue failed — dropping');
+  }
   return true;
 }
 
@@ -136,7 +223,15 @@ export function createSmtpServer() {
             // Reverse-reply branch (MNC-708 Stage 1): forwarded+<token>@<platform>.
             // Owns the recipient fully (accept-and-discard) when the flag is on
             // and the address matches; otherwise falls through unchanged.
-            if (await tryHandleReverseReply(localPart, domain, sizeBytes)) {
+            if (await tryHandleReverseReply(localPart, domain, sizeBytes, {
+              envelopeFrom: session.envelope.mailFrom ? session.envelope.mailFrom.address : '',
+              rawMessage: raw,
+              messageId,
+              subject,
+              textBody,
+              htmlBody,
+              headers,
+            })) {
               continue;
             }
             await handleInbound({
