@@ -29,6 +29,7 @@ function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError("");
     if (password !== confirm) {
       setError("Passwords do not match");
