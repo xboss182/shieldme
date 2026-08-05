@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
-import { Plus } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Link, useRouter } from "@tanstack/react-router";
+import { LogIn, LogOut, Plus } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
+import { clearSession, getCachedUser } from "@/lib/auth";
 
 export function AppShell({
   eyebrow = "Main Console",
@@ -11,6 +13,34 @@ export function AppShell({
   action?: ReactNode;
   children: ReactNode;
 }) {
+  const router = useRouter();
+  const [user, setUser] = useState<ReturnType<typeof getCachedUser>>(null);
+
+  useEffect(() => {
+    setUser(getCachedUser());
+  }, []);
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-neutral-50 px-4">
+        <div className="max-w-md w-full text-center">
+          <div className="mx-auto mb-4 size-10 rounded-md bg-brand flex items-center justify-center">
+            <div className="size-3 bg-neutral-50 rounded-full" />
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight">ShieldMail</h1>
+          <p className="mt-2 text-sm text-neutral-500">
+            Sign in to manage your aliases, domains, recipients, and delivery.
+          </p>
+          <Link
+            to="/login"
+            className="mt-6 inline-flex items-center gap-2 rounded-md bg-brand hover:bg-brand-hover px-4 py-2 text-sm font-medium text-white ring-1 ring-brand"
+          >
+            <LogIn className="size-4" /> Sign in
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-neutral-50 font-sans text-neutral-900">
@@ -33,7 +63,19 @@ export function AppShell({
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="size-8 rounded-full bg-neutral-200 outline outline-1 -outline-offset-1 outline-black/5" />
+              <span className="hidden sm:block text-xs text-neutral-500">{user.email}</span>
+              <button
+                type="button"
+                aria-label="Sign out"
+                onClick={() => {
+                  clearSession();
+                  setUser(null);
+                  void router.invalidate();
+                }}
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-500 hover:text-neutral-900 cursor-pointer"
+              >
+                <LogOut className="size-3.5" /> Sign out
+              </button>
               {action ?? (
                 <a
                   href="/aliases"
@@ -45,7 +87,6 @@ export function AppShell({
                   New alias
                 </a>
               )}
-
             </div>
           </div>
         </header>

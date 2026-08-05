@@ -1,5 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
+import { useAliases, useAliasStats, useDomains, useRecipients } from "@/lib/api";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -21,60 +22,48 @@ export const Route = createFileRoute("/")({
   component: DashboardPage,
 });
 
-const primarySpark1 = [40, 60, 45, 90, 70, 55];
-const primarySpark2 = [20, 35, 80, 65, 45, 95];
-const primarySpark3 = [30, 40, 20, 50, 70, 10];
+const spark = [40, 60, 45, 90, 70, 55];
 
-type Alias = {
-  status: "active" | "warn" | "disabled";
+type Row = {
+  id: string;
+  status: "active" | "disabled";
   address: string;
   forwardTo: string;
   forwarded: number;
   blocked: number;
   spam: number;
-  security: "pgp" | "admin" | "disabled";
+  security: "pgp" | "disabled";
 };
 
-const aliases: Alias[] = [
-  {
-    status: "active",
-    address: "shopping.xk89@shield.mail",
-    forwardTo: "personal.inbox@gmail.com",
-    forwarded: 142,
-    blocked: 0,
-    spam: 12,
-    security: "pgp",
-  },
-  {
-    status: "active",
-    address: "news.v8s2@shield.mail",
-    forwardTo: "personal.inbox@gmail.com",
-    forwarded: 84,
-    blocked: 3,
-    spam: 0,
-    security: "admin",
-  },
-  {
-    status: "active",
-    address: "signup.p04q@shield.mail",
-    forwardTo: "vault@fastmail.net",
-    forwarded: 39,
-    blocked: 1,
-    spam: 4,
-    security: "pgp",
-  },
-  {
-    status: "disabled",
-    address: "old.service.q12@shield.mail",
-    forwardTo: "work.backup@co.uk",
-    forwarded: 0,
-    blocked: 0,
-    spam: 0,
-    security: "disabled",
-  },
-];
-
 function DashboardPage() {
+  const { data: aliases } = useAliases();
+  const { data: stats } = useAliasStats();
+  const { data: domains } = useDomains();
+  const { data: recipients } = useRecipients();
+
+  const rows: Row[] = (aliases ?? []).map((a) => {
+    const s = stats?.perAlias?.[a.id];
+    return {
+      id: a.id,
+      status: a.status,
+      address: `${a.localPart}@${a.domain.domain}`,
+      forwardTo: a.recipient.email,
+      forwarded: s?.forwarded ?? 0,
+      blocked: s?.blocked ?? 0,
+      spam: (s?.spamTagged ?? 0) + (s?.spamRejected ?? 0),
+      security: a.protectionStatus === "protected" ? "pgp" : "disabled",
+    };
+  });
+
+  const activeCount = (aliases ?? []).filter((a) => a.status === "active").length;
+  const verifiedDomains = (domains ?? []).filter((d) => d.status === "verified").length;
+  const pgpProtected = (aliases ?? []).filter((a) => a.protectionStatus === "protected").length;
+  const totalForwarded = stats?.totalForwarded ?? 0;
+  const totalBlocked = stats?.totalBlocked ?? 0;
+  const quarantined = stats?.totalSpamQuarantined ?? 0;
+  const spamPolicy = stats?.totalSpamRejected ?? 0;
+  const spamTagged = stats?.totalSpamTagged ?? 0;
+
   return (
     <AppShell>
       <div className="p-8 max-w-7xl w-full mx-auto">
@@ -89,37 +78,40 @@ function DashboardPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
           <KpiCard
             label="Active Aliases"
-            badge="96% UTIL"
-            value="482"
-            suffix="/ 500"
-            spark={primarySpark1}
+            value={String(activeCount)}
+            suffix={aliases ? `/ ${aliases.length}` : undefined}
+            spark={spark}
             sparkTone="emerald"
           />
           <KpiCard
             label="Forwarded"
-            badge="30D VOLUME"
-            value="12,492"
-            trend="+12%"
-            spark={primarySpark2}
+            badge="ALL-TIME"
+            value={totalForwarded.toLocaleString()}
+            spark={spark}
             sparkTone="neutral"
           />
           <KpiCard
             label="Threats Blocked"
             signalDot
-            value="1,102"
-            suffix="QUARANTINED"
-            subline="742 policy · 360 spam"
-            spark={primarySpark3}
+            value={totalBlocked.toLocaleString()}
+            suffix={`${quarantined.toLocaleString()} QUARANTINED`}
+            subline={`${spamPolicy.toLocaleString()} policy · ${spamTagged.toLocaleString()} spam`}
+            spark={spark}
             sparkTone="neutral"
           />
         </div>
 
         {/* Secondary Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-          <MiniTile label="Verified Domains" value="04" />
-          <MiniTile label="Recipients" value="02" />
-          <MiniTile label="PGP Protected" value="124" tag="SECURE" tagTone="emerald" />
-          <SpamTile />
+          <MiniTile label="Verified Domains" value={String(verifiedDomains).padStart(2, "0")} />
+          <MiniTile label="Recipients" value={String(recipients?.length ?? 0).padStart(2, "0")} />
+          <MiniTile
+            label="PGP Protected"
+            value={String(pgpProtected)}
+            tag={pgpProtected ? "SECURE" : undefined}
+            tagTone="emerald"
+          />
+          <SpamTile rejected={spamPolicy} quarantined={quarantined} tagged={spamTagged} />
         </div>
 
         {/* Recent Aliases */}
@@ -128,14 +120,14 @@ function DashboardPage() {
             <h2 className="text-sm font-semibold">Recent Aliases</h2>
             <div className="flex items-center gap-4">
               <span className="text-[10px] font-mono uppercase tracking-widest text-neutral-400">
-                {aliases.length} of 482 shown
+                {rows.length} total
               </span>
-              <a
-                href="/aliases"
+              <Link
+                to="/aliases"
                 className="text-xs font-medium text-brand hover:underline underline-offset-4"
               >
                 View all aliases
-              </a>
+              </Link>
             </div>
           </div>
           <div className="overflow-x-auto">
@@ -151,8 +143,8 @@ function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-950/5">
-                {aliases.map((a) => (
-                  <AliasRow key={a.address} alias={a} />
+                {rows.map((a) => (
+                  <AliasRow key={a.id} alias={a} />
                 ))}
               </tbody>
             </table>
@@ -169,7 +161,6 @@ function KpiCard({
   signalDot,
   value,
   suffix,
-  trend,
   subline,
   spark,
   sparkTone,
@@ -179,7 +170,6 @@ function KpiCard({
   signalDot?: boolean;
   value: string;
   suffix?: string;
-  trend?: string;
   subline?: string;
   spark: number[];
   sparkTone: "emerald" | "neutral";
@@ -203,7 +193,6 @@ function KpiCard({
       <div className="flex items-baseline gap-2 font-mono">
         <span className="text-3xl tracking-tight font-medium">{value}</span>
         {suffix ? <span className="text-xs text-neutral-400 font-medium">{suffix}</span> : null}
-        {trend ? <span className="text-[11px] font-medium text-emerald-600">{trend}</span> : null}
       </div>
       {subline ? (
         <p className="mt-1 text-[11px] font-mono text-neutral-400 tracking-tight">{subline}</p>
@@ -221,11 +210,7 @@ function KpiCard({
                 ? "bg-neutral-900/20"
                 : "bg-neutral-200/60";
           return (
-            <div
-              key={i}
-              className={`w-full rounded-t-[1px] ${cls}`}
-              style={{ height: `${h}%` }}
-            />
+            <div key={i} className={`w-full rounded-t-[1px] ${cls}`} style={{ height: `${h}%` }} />
           );
         })}
       </div>
@@ -263,26 +248,38 @@ function MiniTile({
   );
 }
 
-function SpamTile() {
+function SpamTile({
+  rejected,
+  quarantined,
+  tagged,
+}: {
+  rejected: number;
+  quarantined: number;
+  tagged: number;
+}) {
+  const total = Math.max(1, rejected + quarantined + tagged);
   const legend = [
-    { label: "Rej", value: "660", cls: "bg-neutral-800" },
-    { label: "Quar", value: "276", cls: "bg-neutral-400" },
-    { label: "Tag", value: "166", cls: "bg-neutral-200" },
+    { label: "Rej", value: rejected, cls: "bg-neutral-800" },
+    { label: "Quar", value: quarantined, cls: "bg-neutral-400" },
+    { label: "Tag", value: tagged, cls: "bg-neutral-200" },
   ];
   return (
     <div className="bg-neutral-50 ring-1 ring-black/5 rounded-xl p-4">
       <p className="text-[11px] font-medium text-neutral-400 uppercase">Spam (Rej/Quar/Tag)</p>
       <div className="mt-2 h-2 w-full flex rounded-full overflow-hidden">
-        <div className="h-full bg-neutral-800" style={{ width: "60%" }} />
-        <div className="h-full bg-neutral-400" style={{ width: "25%" }} />
-        <div className="h-full bg-neutral-200" style={{ width: "15%" }} />
+        <div className="h-full bg-neutral-800" style={{ width: `${(rejected / total) * 100}%` }} />
+        <div
+          className="h-full bg-neutral-400"
+          style={{ width: `${(quarantined / total) * 100}%` }}
+        />
+        <div className="h-full bg-neutral-200" style={{ width: `${(tagged / total) * 100}%` }} />
       </div>
       <div className="mt-2 flex items-center gap-3">
         {legend.map((l) => (
           <div key={l.label} className="flex items-center gap-1.5">
             <div className={`size-1.5 rounded-full ${l.cls}`} />
             <span className="text-[10px] font-mono text-neutral-500">
-              {l.label} <span className="text-neutral-400">{l.value}</span>
+              {l.label} <span className="text-neutral-400">{l.value.toLocaleString()}</span>
             </span>
           </div>
         ))}
@@ -291,13 +288,8 @@ function SpamTile() {
   );
 }
 
-function AliasRow({ alias }: { alias: Alias }) {
-  const statusDot =
-    alias.status === "active"
-      ? "bg-emerald-500"
-      : alias.status === "warn"
-        ? "bg-amber-500"
-        : "bg-neutral-300";
+function AliasRow({ alias }: { alias: Row }) {
+  const statusDot = alias.status === "active" ? "bg-emerald-500" : "bg-neutral-300";
   const muted = alias.status === "disabled";
 
   return (
@@ -315,9 +307,7 @@ function AliasRow({ alias }: { alias: Alias }) {
           <span className="text-xs text-neutral-400">{alias.forwardTo}</span>
         </div>
       </td>
-      <td
-        className={`px-6 py-4 text-right font-mono text-xs ${muted ? "text-neutral-400" : ""}`}
-      >
+      <td className={`px-6 py-4 text-right font-mono text-xs ${muted ? "text-neutral-400" : ""}`}>
         {alias.forwarded}
       </td>
       <td
@@ -327,9 +317,7 @@ function AliasRow({ alias }: { alias: Alias }) {
       >
         {alias.blocked}
       </td>
-      <td
-        className={`px-6 py-4 text-right font-mono text-xs ${muted ? "text-neutral-400" : ""}`}
-      >
+      <td className={`px-6 py-4 text-right font-mono text-xs ${muted ? "text-neutral-400" : ""}`}>
         {alias.spam}
       </td>
       <td className="px-6 py-4">
@@ -337,14 +325,6 @@ function AliasRow({ alias }: { alias: Alias }) {
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand/10 text-brand font-medium tracking-wide">
             PGP
           </span>
-        )}
-        {alias.security === "admin" && (
-          <div className="flex items-center gap-1">
-            <div className="size-1 rounded-full bg-amber-500" />
-            <span className="text-[10px] text-neutral-400 font-medium uppercase tracking-tight">
-              Admin Only Access
-            </span>
-          </div>
         )}
         {alias.security === "disabled" && (
           <span className="text-[10px] text-neutral-300 uppercase font-medium">Disabled</span>
