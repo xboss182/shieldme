@@ -368,6 +368,8 @@ export function usePlanTiers() {
     queryKey: ["plan-tiers"],
     queryFn: () =>
       api.get<{ plans: Record<AccountPlan, PlanLimits> }>("/api/plans/tiers").then((r) => r.plans),
+    retry: (failureCount, error) =>
+      error instanceof ApiError && error.status === 401 ? false : failureCount < 3,
   });
 }
 
