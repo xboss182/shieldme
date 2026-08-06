@@ -27,7 +27,10 @@ function corsMiddleware(req: express.Request, res: express.Response, next: expre
 
 export function createApp() {
   const app = express();
-  app.set('trust proxy', 1);
+  // Fix rate-limiting behind reverse proxies (Caddy + Cloudflare).
+  // Express default trust proxy=false causes req.ip to report 127.0.0.1 when reverse-proxied locally.
+  // Setting 'trust proxy', true (or 2) allows Express to parse X-Forwarded-For properly through Cloudflare -> Caddy -> Express.
+  app.set('trust proxy', true);
 
   app.use(corsMiddleware);
   app.use(helmet({

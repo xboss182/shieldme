@@ -1,121 +1,229 @@
-// API client for api.shieldme.cc
-type ShieldMeImportMeta = ImportMeta & {
-  env?: {
-    VITE_API_BASE_URL?: string;
-  };
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { clearSession, getAccessToken, getRefreshToken, setSession, type Session } from "./auth";
+
+export const API_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "https://api.shieldmail.vip";
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+    public code?: string,
+  ) {
+    super(message);
+  }
+}
+
+async function readError(res: Response): Promise<{ error: string; code?: string }> {
+  try {
+    const body = (await res.json()) as { error?: unknown; code?: unknown };
+    return {
+      error: typeof body.error === "string" ? body.error : res.statusText,
+      code: typeof body.code === "string" ? body.code : undefined,
+    };
+  } catch {
+    return { error: res.statusText };
+  }
+}
+
+async function raw<T>(
+  path: string,
+  { method = "GET", body }: { method?: string; body?: unknown } = {},
+  token?: string,
+): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    headers: {
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const info = await readError(res);
+    throw new ApiError(res.status, info.error, info.code);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+// Attaches the user's access token; on a 401 it tries one refresh-token
+// rotation before failing. Clears the session if the refresh also 401s.
+async function authFetch<T>(
+  path: string,
+  opts: { method?: string; body?: unknown } = {},
+): Promise<T> {
+  const attempt = (token?: string) => raw<T>(path, opts, token);
+  try {
+    return await attempt(getAccessToken() ?? undefined);
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.status !== 401 || !getRefreshToken()) throw err;
+    try {
+      const session = await raw<Session>("/api/auth/refresh", {
+        method: "POST",
+        body: { refreshToken: getRefreshToken() },
+      });
+      setSession(session);
+      return await attempt(session.accessToken);
+    } catch {
+      clearSession();
+      throw err;
+    }
+  }
+}
+
+export const api = {
+  get: <T>(path: string) => authFetch<T>(path),
+  post: <T>(path: string, body?: unknown) => authFetch<T>(path, { method: "POST", body }),
+  patch: <T>(path: string, body: unknown) => authFetch<T>(path, { method: "PATCH", body }),
+  put: <T>(path: string, body: unknown) => authFetch<T>(path, { method: "PUT", body }),
+  del: <T>(path: string) => authFetch<T>(path, { method: "DELETE" }),
 };
 
-const API_BASE =
-  (typeof import.meta !== "undefined" &&
-    (import.meta as ShieldMeImportMeta).env?.VITE_API_BASE_URL) ||
-  "https://api.shieldme.cc";
-
-export const tokenStore = {
-  getAccess: () => (typeof window !== "undefined" ? localStorage.getItem("sm_access") : null),
-  getRefresh: () => (typeof window !== "undefined" ? localStorage.getItem("sm_refresh") : null),
-  set: (access: string, refresh: string) => {
-    localStorage.setItem("sm_access", access);
-    localStorage.setItem("sm_refresh", refresh);
-  },
-  clear: () => {
-    localStorage.removeItem("sm_access");
-    localStorage.removeItem("sm_refresh");
-  },
+// Admin calls use the admin secret (raw Bearer token) rather than a user JWT.
+export const adminApi = {
+  get: <T>(path: string, token: string) => raw<T>("/api/admin" + path, {}, token),
+  post: <T>(path: string, token: string, body?: unknown) =>
+    raw<T>("/api/admin" + path, { method: "POST", body }, token),
+  patch: <T>(path: string, token: string, body: unknown) =>
+    raw<T>("/api/admin" + path, { method: "PATCH", body }, token),
+  del: <T>(path: string, token: string, body?: unknown) =>
+    raw<T>(
+      "/api/admin" + path,
+      { method: "DELETE", ...(body !== undefined ? { body } : {}) },
+      token,
+    ),
 };
 
-export interface AuthUser {
-  id: string;
-  email: string;
-  role?: string;
-  plan?: AccountPlan;
+// ---- Shared format utils ----
+
+export function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
-export interface AuthResponse {
-  user: AuthUser;
-  accessToken: string;
-  refreshToken: string;
+
+export function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
-export interface DnsRecords {
-  mx?: { type: string; name: string; value: string; priority?: number };
-  txt?: { type: string; name: string; value: string };
-  spf?: { type: string; name: string; value: string };
-  dkim?: { type: string; name: string; value: string };
-  dmarc?: { type: string; name: string; value: string };
-}
-export interface Domain {
-  id: string;
-  domain: string;
-  status: "pending" | "verified" | "failed";
-  verificationStatus?: "pending" | "verified" | "failed"; // alias for compat
-  isActive: boolean;
-  isShared?: boolean;
-  dkimSelector: string;
-  verifiedAt?: string | null;
-  createdAt: string;
-  dnsRecords?: DnsRecords;
-}
-export interface Recipient {
-  id: string;
-  email: string;
-  status: "pending" | "verified";
-  verified?: boolean; // alias for compat
-  isActive: boolean;
-  verifiedAt?: string | null;
-  createdAt: string;
-}
-export type AliasProtectionStatus = "protected" | "unprotected" | "required_missing_key";
-export interface AliasProtection {
-  status: AliasProtectionStatus;
-  pgpMode: "none" | "optional" | "required";
-  encryptedForwarding: boolean;
-  plaintextForwardingPossible: boolean;
-  key: {
-    available: boolean;
-    fingerprint?: string;
-    algorithm?: string;
-    expiresAt?: string | null;
-    expiresSoon?: boolean;
-    rotationGuidance?: string;
-  };
-}
-export interface Alias {
+
+export const DELIVERY_ERROR_LABELS: Record<string, string> = {
+  mailbox_full: "Mailbox full",
+  pgp_key_required: "PGP key required",
+  spam_report: "Spam complaint",
+  loop_sender: "Loop prevented",
+  unknown_user: "Unknown recipient",
+  size_limit: "Message too large",
+  spam_policy: "Blocked by policy",
+  relay_timeout: "Relay timeout",
+  none: "Delivered",
+};
+
+// ---- Types (mirror alias-forwarder response shapes) ----
+
+export type PgpMode = "none" | "optional" | "required";
+
+export type Alias = {
   id: string;
   localPart: string;
   domainId: string;
-  domain?: { domain: string };
   recipientId: string;
-  recipient?: { email: string };
   status: "active" | "disabled";
-  outboundMode?: "platform" | "custom_smtp";
-  smtpRelayId?: string | null;
-  pgpMode?: "none" | "optional" | "required";
-  protectionStatus?: AliasProtectionStatus;
-  protection?: AliasProtection;
-  enabled?: boolean; // alias for compat
+  outboundMode: string;
+  smtpRelayId: string | null;
+  pgpMode: PgpMode;
   createdAt: string;
   updatedAt: string;
-}
-export interface AliasStats {
+  domain: { domain: string };
+  recipient: { email: string; pgpKey: PgpKey | null };
+  protectionStatus: "protected" | "unprotected" | "required_missing_key";
+};
+
+export type AliasStats = {
   totalForwarded: number;
   totalBlocked: number;
   totalFailed: number;
-  totalSpamTagged?: number;
-  totalSpamRejected?: number;
-  totalSpamQuarantined?: number;
-  totalSpamDetected?: number;
+  totalSpamTagged: number;
+  totalSpamRejected: number;
+  totalSpamQuarantined: number;
+  totalSpamDetected: number;
   perAlias: Record<
     string,
     {
       forwarded: number;
       blocked: number;
       failed: number;
-      spamTagged?: number;
-      spamRejected?: number;
-      spamQuarantined?: number;
+      spamTagged: number;
+      spamRejected: number;
+      spamQuarantined: number;
     }
   >;
-}
+};
+
+export type Domain = {
+  id: string;
+  ownerId: string;
+  domain: string;
+  status: "verified" | "pending" | "failed";
+  verifiedAt: string | null;
+  dkimSelector: string | null;
+  isActive: boolean;
+  createdAt: string;
+  isShared: boolean;
+};
+
+export type DnsRecord = {
+  type: string;
+  name: string;
+  value: string;
+  priority?: number;
+  note?: string;
+};
+export type DnsRecords = { required: DnsRecord[]; optional: DnsRecord[] };
+
+export type Recipient = {
+  id: string;
+  email: string;
+  status: "verified" | "pending";
+  verifiedAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+};
+
+export type PgpKey = {
+  fingerprint: string;
+  algorithm: string;
+  expiresAt: string | null;
+  createdAt: string;
+  expiresSoon?: boolean;
+};
+
+export type FailedDelivery = {
+  id: string;
+  aliasId: string;
+  aliasLocalPart: string;
+  aliasDomain: string;
+  envelopeFrom: string;
+  envelopeTo: string;
+  forwardedTo: string;
+  status: "failed" | "bounced" | "complained" | "rejected";
+  failureType: string;
+  failureReason: string;
+  rejectionReason: string;
+  outboundProvider: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AccountPlan = "free" | "basic" | "pro" | "business";
-export interface PlanLimits {
+export type PlanLimits = {
   maxDomains: number;
   maxAliases: number;
   maxRecipients: number;
@@ -123,526 +231,312 @@ export interface PlanLimits {
   pgpEnabled: boolean;
   customOutboundProvider: boolean;
   billingEnabled: boolean;
-}
-export interface PlanSummary {
+};
+export type PlanSummary = {
   plan: AccountPlan;
   limits: PlanLimits;
   usage: { domains: number; recipients: number; aliases: number; monthlyForwards: number };
-}
+};
 
-export type SmtpRelayStatus =
-  | "draft"
-  | "credentials_unverified"
-  | "testing_dns"
-  | "testing_tls"
-  | "testing_auth"
-  | "test_submitted"
-  | "awaiting_recipient_confirmation"
-  | "ready"
-  | "active"
-  | "degraded"
-  | "circuit_open"
-  | "disabled"
-  | "revoked";
-export type SmtpCircuitStatus = "closed" | "open" | "half_open";
+// ---- Admin types ----
 
-export interface SmtpRelay {
-  id: string;
-  domainId: string;
-  label: string;
-  host: string;
-  port: 465 | 587;
-  tlsMode: "implicit_tls" | "starttls";
-  authMethod: "plain" | "login";
-  identityLocalPart: string;
-  bounceSpfInclude: string;
-  credentialConfigured: boolean;
-  status: SmtpRelayStatus;
-  circuitStatus: SmtpCircuitStatus;
-  circuitUntil: string | null;
-  lastOutcomeCode: string | null;
-  lastTestedAt: string | null;
-  activeCredentialVersion: number | null;
-  queue: { queued: number; retryDeadline: string | null };
-  createdAt: string;
-  updatedAt: string;
-}
-export interface SmtpRelayInput {
-  label: string;
-  domainId: string;
-  host: string;
-  port: 465 | 587;
-  tlsMode: "implicit_tls" | "starttls";
-  authMethod: "plain" | "login";
-  username: string;
-  password: string;
-  identityLocalPart: string;
-  bounceSpfInclude: string;
-}
-export interface SmtpRelayTest {
-  id: string;
-  status: "awaiting_recipient_confirmation";
-  expiresAt: string;
-}
-export interface SmtpRelayAuditEvent {
-  id: string;
-  timestamp: string;
-  action: string;
-  metadata: Record<string, unknown>;
-}
-
-export interface AdminConfig {
-  platformDomain?: string;
-  resendConfigured?: boolean;
-  sesConfigured?: boolean;
-  outboundProvider?: "resend" | "ses";
-  outboundConfigured?: boolean;
-  forwardingEnabled?: boolean;
-}
-
-export interface AdminStats {
-  totals: Record<string, number>;
-  active: Record<string, number>;
-  suspended: Record<string, number>;
-  deliveries: Array<{ status: string; window: string; count: number }> & {
-    pgpEncrypted?: number;
-  };
-  pgpEncryptedDeliveries: number;
-  queueDepth: Record<string, number> | number;
-  users?: { total: number };
-  domains?: { total: number };
-  aliases?: { total: number };
-  queue?: { depth: number };
-}
-export interface AdminUser {
+export type AdminUser = {
   id: string;
   email: string;
   role: string;
-  plan?: AccountPlan;
+  plan: AccountPlan;
   isActive: boolean;
-  domainCount?: number;
-  recipientCount?: number;
-  aliasCount?: number;
   createdAt: string;
-  updatedAt: string;
-}
-export interface AdminDomain {
+  domainCount: number;
+  recipientCount: number;
+  aliasCount: number;
+};
+export type AdminDomain = {
   id: string;
   domain: string;
+  ownerId: string;
+  ownerEmail?: string;
   status: string;
   isActive: boolean;
-  ownerEmail?: string;
   createdAt: string;
-  updatedAt: string;
-}
-export interface AdminAlias {
+};
+export type AdminAlias = {
   id: string;
   localPart: string;
-  domain?: string;
-  recipientEmail?: string;
-  ownerEmail?: string;
-  status: string;
-  pgpMode?: string;
+  domain: string;
+  recipientEmail: string;
+  status: "active" | "disabled";
+  pgpMode: PgpMode;
   createdAt: string;
-  updatedAt: string;
-}
-export interface AuditLog {
+};
+export type AdminReserved = {
   id: string;
-  timestamp: string;
-  actorType: string;
-  actorId?: string | null;
+  localPart: string;
+  domainId: string | null;
+  domain: string | null;
+  action: "reserve" | "allow";
+  note: string;
+  sourceBatch: string | null;
+  createdAt: string;
+};
+export type AdminDelivery = {
+  id: string;
+  alias: string;
+  recipient: string;
+  status: string;
+  failureType: string;
+  pgpMode: PgpMode;
+  createdAt: string;
+};
+export type AuditLog = {
+  id: string;
   action: string;
   targetType: string;
   targetId: string;
-  metadata: Record<string, unknown>;
-}
-export type AdminAuditLog = AuditLog;
-export interface AdminDelivery {
-  id: string;
-  envelopeFrom: string;
-  envelopeTo: string;
-  forwardedTo?: string | null;
-  status: string;
-  errorMessage?: string | null;
-  pgpModeUsed?: string | null;
-  sizeBytes?: number | null;
+  actor: string;
   createdAt: string;
-  updatedAt: string;
-  alias?: string;
-  recipient?: string;
-  pgpMode?: string | null;
-}
-
-export interface FailedDelivery {
-  id: string;
-  aliasId?: string | null;
-  aliasLocalPart?: string | null;
-  aliasDomain?: string | null;
-  envelopeFrom: string;
-  envelopeTo: string;
-  forwardedTo?: string | null;
-  status: string;
-  failureType?: string | null;
-  failureReason?: string | null;
-  rejectionReason?: string | null;
-  outboundProvider?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface ReservedLocalPart {
-  id: string;
-  localPart: string;
-  domainId?: string | null;
-  domain?: string | null;
-  action: "reserve" | "allow";
-  note?: string | null;
-  sourceBatch?: string | null;
-  sourceSha256?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export class ApiError extends Error {
-  status: number;
-  code?: string;
-
-  constructor(status: number, message: string, code?: string) {
-    super(message);
-    this.name = "ApiError";
-    this.status = status;
-    this.code = code;
-  }
-}
-
-async function tryRefresh(): Promise<boolean> {
-  const refresh = tokenStore.getRefresh();
-  if (!refresh) return false;
-  try {
-    const res = await fetch(API_BASE + "/api/auth/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: refresh }),
-    });
-    if (!res.ok) return false;
-    const data: AuthResponse = await res.json();
-    tokenStore.set(data.accessToken, data.refreshToken);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function responseError(res: Response) {
-  let message = res.statusText;
-  let code: string | undefined;
-  try {
-    const body = (await res.json()) as { error?: unknown; code?: unknown };
-    if (typeof body.error === "string") message = body.error;
-    if (typeof body.code === "string") code = body.code;
-  } catch {
-    return new ApiError(res.status, message);
-  }
-  return new ApiError(res.status, message, code);
-}
-
-export async function apiFetch<T>(
-  path: string,
-  options: RequestInit & { skipAuth?: boolean; adminSecret?: string } = {},
-): Promise<T> {
-  const { skipAuth, adminSecret, ...fetchOpts } = options;
-  const headers = new Headers(fetchOpts.headers as HeadersInit);
-  if (!skipAuth) {
-    const token = tokenStore.getAccess();
-    if (token) headers.set("Authorization", "Bearer " + token);
-  }
-  if (adminSecret) headers.set("Authorization", "Bearer " + adminSecret);
-  if (fetchOpts.body && !headers.has("Content-Type"))
-    headers.set("Content-Type", "application/json");
-
-  const res = await fetch(API_BASE + path, { ...fetchOpts, headers });
-
-  if (res.status === 401 && !skipAuth) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
-      headers.set("Authorization", "Bearer " + tokenStore.getAccess()!);
-      const retried = await fetch(API_BASE + path, { ...fetchOpts, headers });
-      if (!retried.ok) throw await responseError(retried);
-      if (retried.status === 204) return undefined as unknown as T;
-      return retried.json() as Promise<T>;
-    }
-    tokenStore.clear();
-    throw new ApiError(401, "Unauthorized");
-  }
-
-  if (!res.ok) throw await responseError(res);
-  if (res.status === 204) return undefined as unknown as T;
-  return res.json() as Promise<T>;
-}
-
-export const authApi = {
-  register: (email: string, password: string) =>
-    apiFetch<AuthResponse>("/api/auth/register", {
-      method: "POST",
-      skipAuth: true,
-      body: JSON.stringify({ email, password }),
-    }),
-  login: (email: string, password: string) =>
-    apiFetch<AuthResponse>("/api/auth/login", {
-      method: "POST",
-      skipAuth: true,
-      body: JSON.stringify({ email, password }),
-    }),
 };
 
-export const domainsApi = {
-  list: () => apiFetch<{ domains: Domain[] }>("/api/domains"),
-  add: (domain: string) =>
-    apiFetch<{ domain: Domain; dnsRecords: DnsRecords }>("/api/domains", {
-      method: "POST",
-      body: JSON.stringify({ domain }),
-    }),
-  get: (id: string) => apiFetch<{ domain: Domain; dnsRecords: DnsRecords }>("/api/domains/" + id),
-  verify: (id: string) =>
-    apiFetch<{ domain: Domain; verified: boolean; checks: { mx: boolean; txt: boolean } }>(
-      "/api/domains/" + id + "/verify",
-      { method: "POST" },
-    ),
-  remove: (id: string) => apiFetch<void>("/api/domains/" + id, { method: "DELETE" }),
-};
+// ---- Query hooks ----
 
-export const recipientsApi = {
-  list: () => apiFetch<{ recipients: Recipient[] }>("/api/recipients"),
-  add: (email: string) =>
-    apiFetch<{
-      recipient: Recipient;
-      verificationToken: string;
-      verificationSent?: boolean;
-      expiresAt: string;
-    }>("/api/recipients", { method: "POST", body: JSON.stringify({ email }) }),
-  resendVerification: (id: string) =>
-    apiFetch<{ verificationToken: string; verificationSent?: boolean; expiresAt: string }>(
-      "/api/recipients/" + id + "/resend",
-      { method: "POST" },
-    ),
-  verify: (id: string, token: string) =>
-    apiFetch<{ recipient: Recipient }>("/api/recipients/" + id + "/verify", {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    }),
-  remove: (id: string) => apiFetch<void>("/api/recipients/" + id, { method: "DELETE" }),
-};
+function invalidate(qc: ReturnType<typeof useQueryClient>, keys: string[][]) {
+  for (const key of keys) void qc.invalidateQueries({ queryKey: key });
+}
 
-export const aliasesApi = {
-  list: () => apiFetch<{ aliases: Alias[] }>("/api/aliases"),
-  create: (input: {
-    localPart?: string;
-    serviceLabel?: string;
-    domainId: string;
-    recipientId: string;
-    pgpMode?: "none" | "optional" | "required";
-  }) =>
-    apiFetch<{ alias: Alias; address: string; recipientEmail: string }>("/api/aliases", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  enable: (id: string) =>
-    apiFetch<{ alias: Alias }>("/api/aliases/" + id + "/enable", { method: "POST" }),
-  disable: (id: string) =>
-    apiFetch<{ alias: Alias }>("/api/aliases/" + id + "/disable", { method: "POST" }),
-  remove: (id: string) => apiFetch<void>("/api/aliases/" + id, { method: "DELETE" }),
-  verificationCode: (id: string) =>
-    apiFetch<{ verificationCode: string }>(`/api/aliases/${id}/verification-code`),
-  stats: () => apiFetch<AliasStats>("/api/aliases/stats"),
-  failedDeliveries: (status?: string, page = 1, limit = 50) =>
-    apiFetch<{ deliveries: FailedDelivery[]; page: number; limit: number }>(
-      `/api/aliases/failed-deliveries?page=${page}&limit=${limit}${status ? "&status=" + encodeURIComponent(status) : ""}`,
-    ),
-};
+export function useAliases() {
+  return useQuery({
+    queryKey: ["aliases"],
+    queryFn: () => api.get<{ aliases: Alias[] }>("/api/aliases").then((r) => r.aliases),
+  });
+}
 
-const smtpRelaysApiPath = "/api/v2/smtp-relays";
+export function useAliasStats() {
+  return useQuery({
+    queryKey: ["alias-stats"],
+    queryFn: () => api.get<AliasStats>("/api/aliases/stats"),
+  });
+}
 
-export const smtpRelaysApi = {
-  list: () => apiFetch<{ relays: SmtpRelay[] }>(smtpRelaysApiPath),
-  create: (input: SmtpRelayInput) =>
-    apiFetch<{ relay: SmtpRelay }>(smtpRelaysApiPath, {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  update: (id: string, patch: Partial<SmtpRelayInput>) =>
-    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(patch),
-    }),
-  test: (id: string, recipientId: string) =>
-    apiFetch<{ test: SmtpRelayTest }>(`${smtpRelaysApiPath}/${id}/test`, {
-      method: "POST",
-      body: JSON.stringify({ recipientId }),
-    }),
-  confirmTest: (relayId: string, testId: string, token: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${relayId}/tests/${testId}/confirm`, {
-      method: "POST",
-      body: JSON.stringify({ token }),
-    }),
-  rotateCredentials: (
-    relayId: string,
-    input: { username: string; password: string; recipientId: string },
-  ) =>
-    apiFetch<{ test: SmtpRelayTest }>(`${smtpRelaysApiPath}/${relayId}/rotate-credentials`, {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
-  enable: (id: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}/enable`, { method: "POST" }),
-  disable: (id: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}/disable`, { method: "POST" }),
-  revoke: (id: string) =>
-    apiFetch<{ relay: SmtpRelay }>(`${smtpRelaysApiPath}/${id}/revoke`, { method: "POST" }),
-  auditEvents: (id: string) =>
-    apiFetch<{ events: SmtpRelayAuditEvent[] }>(`${smtpRelaysApiPath}/${id}/audit-events`),
-  remove: (id: string) => apiFetch<void>(`${smtpRelaysApiPath}/${id}`, { method: "DELETE" }),
-};
+export function useDomains() {
+  return useQuery({
+    queryKey: ["domains"],
+    queryFn: () => api.get<{ domains: Domain[] }>("/api/domains").then((r) => r.domains),
+  });
+}
 
-export const aliasesOutboundApi = {
-  setRoute: (
-    aliasId: string,
-    route:
-      | { mode: "platform" }
-      | { mode: "custom_smtp"; relayId: string; acknowledgeNoFallback: true },
-  ) =>
-    apiFetch<{ alias: Alias }>(`/api/aliases/${aliasId}/outbound-route`, {
-      method: "PUT",
-      body: JSON.stringify(route),
-    }),
-};
+export function useDomain(id: string) {
+  return useQuery({
+    queryKey: ["domain", id],
+    enabled: Boolean(id),
+    queryFn: () => api.get<{ domain: Domain; dnsRecords: DnsRecords }>(`/api/domains/${id}`),
+  });
+}
 
-export const adminApi = {
-  getConfig: () => apiFetch<AdminConfig>("/api/admin/config"),
-  setConfig: (platformDomain: string, resendApiKey: string, outboundProvider: "resend" | "ses") =>
-    apiFetch<AdminConfig>("/api/admin/config", {
-      method: "POST",
-      body: JSON.stringify({ platformDomain, resendApiKey, outboundProvider }),
-    }),
-  stats: (adminSecret?: string) => apiFetch<AdminStats>("/api/admin/stats", { adminSecret }),
-  users: (search = "", adminSecret?: string) =>
-    apiFetch<{ users: AdminUser[] }>(`/api/admin/users?search=${encodeURIComponent(search)}`, {
-      adminSecret,
-    }),
-  setUserStatus: (id: string, status: "active" | "suspended", adminSecret?: string) =>
-    apiFetch<{ user: AdminUser }>(`/api/admin/users/${id}`, {
-      method: "PATCH",
-      adminSecret,
-      body: JSON.stringify({ status }),
-    }),
-  setUserPlan: (id: string, plan: AccountPlan, adminSecret?: string) =>
-    apiFetch<{ user: AdminUser }>(`/api/admin/users/${id}`, {
-      method: "PATCH",
-      adminSecret,
-      body: JSON.stringify({ plan }),
-    }),
-  domains: (search = "", adminSecret?: string) =>
-    apiFetch<{ domains: AdminDomain[] }>(
-      `/api/admin/domains?search=${encodeURIComponent(search)}`,
-      { adminSecret },
-    ),
-  setDomainStatus: (id: string, status: "active" | "suspended", adminSecret?: string) =>
-    apiFetch<{ domain: AdminDomain }>(`/api/admin/domains/${id}`, {
-      method: "PATCH",
-      adminSecret,
-      body: JSON.stringify({ status }),
-    }),
-  aliases: (search = "", adminSecret?: string) =>
-    apiFetch<{ aliases: AdminAlias[] }>(`/api/admin/aliases?search=${encodeURIComponent(search)}`, {
-      adminSecret,
-    }),
-  setAliasStatus: (id: string, status: "active" | "disabled", adminSecret?: string) =>
-    apiFetch<{ alias: AdminAlias }>(`/api/admin/aliases/${id}`, {
-      method: "PATCH",
-      adminSecret,
-      body: JSON.stringify({ status }),
-    }),
-  deleteAlias: (id: string, adminSecret?: string) =>
-    apiFetch<void>(`/api/admin/aliases/${id}`, { method: "DELETE", adminSecret }),
-  deliveries: (search = "", adminSecret?: string) =>
-    apiFetch<{ deliveries: AdminDelivery[] }>(
-      `/api/admin/deliveries?alias=${encodeURIComponent(search)}&recipient=${encodeURIComponent(search)}`,
-      { adminSecret },
-    ),
-  auditLogs: (search = "", adminSecret?: string) =>
-    apiFetch<{ auditLogs: AdminAuditLog[] }>(
-      `/api/admin/audit-logs?action=${encodeURIComponent(search)}`,
-      { adminSecret },
-    ),
-  reservedLocalParts: (search = "", page = 1, limit = 50, adminSecret?: string) =>
-    apiFetch<{
-      reservedLocalParts: ReservedLocalPart[];
-      page: number;
-      limit: number;
-      total: number;
-    }>(
-      `/api/admin/reserved-local-parts?search=${encodeURIComponent(search)}&page=${page}&limit=${limit}`,
-      { adminSecret },
-    ),
-  createReservedLocalPart: (
-    input: {
-      localPart: string;
-      domainId?: string | null;
-      action: "reserve" | "allow";
-      note?: string | null;
+export function useRecipients() {
+  return useQuery({
+    queryKey: ["recipients"],
+    queryFn: () =>
+      api.get<{ recipients: Recipient[] }>("/api/recipients").then((r) => r.recipients),
+  });
+}
+
+export function useRecipientPgp(id: string) {
+  return useQuery({
+    queryKey: ["recipient-pgp", id],
+    enabled: Boolean(id),
+    queryFn: async () => {
+      try {
+        const r = await api.get<{ pgpKey: PgpKey }>(`/api/recipients/${id}/pgp-key?full=true`);
+        return r.pgpKey;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
     },
-    adminSecret?: string,
-  ) =>
-    apiFetch<{ reservedLocalPart: ReservedLocalPart }>("/api/admin/reserved-local-parts", {
-      method: "POST",
-      adminSecret,
-      body: JSON.stringify(input),
-    }),
-  deleteReservedLocalPart: (id: string, adminSecret?: string) =>
-    apiFetch<void>(`/api/admin/reserved-local-parts/${id}`, { method: "DELETE", adminSecret }),
-};
-
-export interface PgpKeyInfo {
-  id: string;
-  fingerprint: string;
-  algorithm: string;
-  expiresAt?: string | null;
-  /** True when the key expires within 30 days. */
-  isExpiringSoon: boolean;
-  createdAt: string;
-  updatedAt: string;
-  publicKeyArmored?: string;
+  });
 }
 
-export const pgpApi = {
-  getKey: (recipientId: string, full = false) =>
-    apiFetch<{ pgpKey: PgpKeyInfo }>(
-      `/api/recipients/${recipientId}/pgp-key${full ? "?full=true" : ""}`,
-    ),
-  uploadKey: (recipientId: string, publicKeyArmored: string) =>
-    apiFetch<{ pgpKey: PgpKeyInfo }>(`/api/recipients/${recipientId}/pgp-key`, {
-      method: "POST",
-      body: JSON.stringify({ publicKeyArmored }),
-    }),
-  deleteKey: (recipientId: string) =>
-    apiFetch<void>(`/api/recipients/${recipientId}/pgp-key`, { method: "DELETE" }),
-  testDelivery: (recipientId: string) =>
-    apiFetch<{ ok: boolean; message: string }>(
-      `/api/recipients/${recipientId}/pgp-key/test-delivery`,
-      {
-        method: "POST",
-      },
-    ),
-};
+export function usePlan() {
+  return useQuery({
+    queryKey: ["plan"],
+    queryFn: () => api.get<PlanSummary>("/api/plans/me"),
+  });
+}
 
-export const aliasesPgpApi = {
-  setPgpMode: (aliasId: string, pgpMode: "none" | "optional" | "required") =>
-    apiFetch<{ alias: Alias }>(`/api/aliases/${aliasId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ pgpMode }),
-    }),
-};
+export function usePlanTiers() {
+  return useQuery({
+    queryKey: ["plan-tiers"],
+    queryFn: () =>
+      api.get<{ plans: Record<AccountPlan, PlanLimits> }>("/api/plans/tiers").then((r) => r.plans),
+  });
+}
 
-export const plansApi = {
-  me: () => apiFetch<PlanSummary>("/api/plans/me"),
-  tiers: () => apiFetch<{ plans: Record<AccountPlan, PlanLimits> }>("/api/plans/tiers"),
-};
+export function useFailedDeliveries(status: string) {
+  return useQuery({
+    queryKey: ["failed-deliveries", status],
+    queryFn: () => {
+      const q = status && status !== "all" ? `?status=${status}` : "";
+      return api
+        .get<{ deliveries: FailedDelivery[] }>(`/api/aliases/failed-deliveries?limit=100${q}`)
+        .then((r) => r.deliveries.filter((d) => status === "all" || d.status === status));
+    },
+  });
+}
+
+export function useMe() {
+  return useQuery({
+    queryKey: ["me"],
+    queryFn: () =>
+      api.get<{ user: { userId: string; email: string } }>("/api/auth/me").then((r) => r.user),
+  });
+}
+
+// ---- Auth mutations ----
+
+export function useLogin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { email: string; password: string }) => {
+      const session = await raw<Session>("/api/auth/login", { method: "POST", body: input });
+      setSession(session);
+      return session.user;
+    },
+    onSuccess: () => void qc.invalidateQueries(),
+  });
+}
+
+// ---- Alias mutations ----
+
+export function useCreateAlias() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      localPart?: string;
+      serviceLabel?: string;
+      domainId: string;
+      recipientId: string;
+      pgpMode?: PgpMode;
+    }) => api.post<{ alias: Alias }>("/api/aliases", body),
+    onSettled: () => invalidate(qc, [["aliases"], ["alias-stats"]]),
+  });
+}
+
+export function useSetAliasPgp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, pgpMode }: { id: string; pgpMode: PgpMode }) =>
+      api.patch<{ alias: Alias }>(`/api/aliases/${id}`, { pgpMode }),
+    onSettled: () => invalidate(qc, [["aliases"]]),
+  });
+}
+
+export function useToggleAlias() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, enable }: { id: string; enable: boolean }) =>
+      enable ? api.post(`/api/aliases/${id}/enable`) : api.post(`/api/aliases/${id}/disable`),
+    onSettled: () => invalidate(qc, [["aliases"]]),
+  });
+}
+
+export function useDeleteAlias() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/api/aliases/${id}`),
+    onSettled: () => invalidate(qc, [["aliases"], ["alias-stats"]]),
+  });
+}
+
+export function useVerificationCode() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.get<{ verificationCode: string }>(`/api/aliases/${id}/verification-code`),
+  });
+}
+
+// ---- Domain mutations ----
+
+export function useAddDomain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (domain: string) => api.post("/api/domains", { domain }),
+    onSettled: () => invalidate(qc, [["domains"]]),
+  });
+}
+
+export function useVerifyDomain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/api/domains/${id}/verify`),
+    onSettled: () => invalidate(qc, [["domains"], ["domain"]]),
+  });
+}
+
+export function useDeleteDomain() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/api/domains/${id}`),
+    onSettled: () => invalidate(qc, [["domains"]]),
+  });
+}
+
+// ---- Recipient mutations ----
+
+export function useAddRecipient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) =>
+      api.post<{ verificationToken: string }>("/api/recipients", { email }),
+    onSettled: () => invalidate(qc, [["recipients"]]),
+  });
+}
+
+export function useVerifyRecipient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, token }: { id: string; token: string }) =>
+      api.post(`/api/recipients/${id}/verify`, { token }),
+    onSettled: () => invalidate(qc, [["recipients"]]),
+  });
+}
+
+export function useResendRecipient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/api/recipients/${id}/resend`),
+    onSettled: () => invalidate(qc, [["recipients"]]),
+  });
+}
+
+export function useDeleteRecipient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/api/recipients/${id}`),
+    onSettled: () => invalidate(qc, [["recipients"]]),
+  });
+}
+
+export function useUploadPgp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, publicKeyArmored }: { id: string; publicKeyArmored: string }) =>
+      api.post(`/api/recipients/${id}/pgp-key`, { publicKeyArmored }),
+    onSettled: () => invalidate(qc, [["recipient-pgp"]]),
+  });
+}
+
+export function useRemovePgp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/api/recipients/${id}/pgp-key`),
+    onSettled: () => invalidate(qc, [["recipient-pgp"]]),
+  });
+}
+
+export function useTestPgp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/api/recipients/${id}/pgp-key/test`),
+    onSettled: () => invalidate(qc, [["recipient-pgp"]]),
+  });
+}
