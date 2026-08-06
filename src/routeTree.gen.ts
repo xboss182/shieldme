@@ -14,6 +14,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as DomainsRouteImport } from './routes/domains'
 import { Route as FailedDeliveriesRouteImport } from './routes/failed-deliveries'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as RecipientsRouteImport } from './routes/recipients'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SubscriptionRouteImport } from './routes/subscription'
@@ -43,6 +44,11 @@ const FailedDeliveriesRoute = FailedDeliveriesRouteImport.update({
   path: '/failed-deliveries',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RecipientsRoute = RecipientsRouteImport.update({
   id: '/recipients',
   path: '/recipients',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/aliases': typeof AliasesRoute
   '/domains': typeof DomainsRoute
   '/failed-deliveries': typeof FailedDeliveriesRoute
+  '/login': typeof LoginRoute
   '/recipients': typeof RecipientsRoute
   '/settings': typeof SettingsRoute
   '/subscription': typeof SubscriptionRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/aliases': typeof AliasesRoute
   '/domains': typeof DomainsRoute
   '/failed-deliveries': typeof FailedDeliveriesRoute
+  '/login': typeof LoginRoute
   '/recipients': typeof RecipientsRoute
   '/settings': typeof SettingsRoute
   '/subscription': typeof SubscriptionRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/aliases': typeof AliasesRoute
   '/domains': typeof DomainsRoute
   '/failed-deliveries': typeof FailedDeliveriesRoute
+  '/login': typeof LoginRoute
   '/recipients': typeof RecipientsRoute
   '/settings': typeof SettingsRoute
   '/subscription': typeof SubscriptionRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/domains'
     | '/failed-deliveries'
+    | '/login'
     | '/recipients'
     | '/settings'
     | '/subscription'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/domains'
     | '/failed-deliveries'
+    | '/login'
     | '/recipients'
     | '/settings'
     | '/subscription'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/aliases'
     | '/domains'
     | '/failed-deliveries'
+    | '/login'
     | '/recipients'
     | '/settings'
     | '/subscription'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   AliasesRoute: typeof AliasesRoute
   DomainsRoute: typeof DomainsRoute
   FailedDeliveriesRoute: typeof FailedDeliveriesRoute
+  LoginRoute: typeof LoginRoute
   RecipientsRoute: typeof RecipientsRoute
   SettingsRoute: typeof SettingsRoute
   SubscriptionRoute: typeof SubscriptionRoute
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof FailedDeliveriesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/recipients': {
       id: '/recipients'
       path: '/recipients'
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   AliasesRoute: AliasesRoute,
   DomainsRoute: DomainsRoute,
   FailedDeliveriesRoute: FailedDeliveriesRoute,
+  LoginRoute: LoginRoute,
   RecipientsRoute: RecipientsRoute,
   SettingsRoute: SettingsRoute,
   SubscriptionRoute: SubscriptionRoute,

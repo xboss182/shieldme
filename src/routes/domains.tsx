@@ -15,7 +15,16 @@ import {
   StatusPill,
   TextInput,
 } from "@/components/ui-kit";
-import { domains as seedDomains, formatDate, type DnsRecord, type Domain } from "@/lib/mock-data";
+import {
+  useAddDomain,
+  useDeleteDomain,
+  useDomain,
+  useDomains,
+  useVerifyDomain,
+  formatDate,
+  type DnsRecord,
+  type Domain,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/domains")({
   head: () => ({
@@ -38,31 +47,18 @@ export const Route = createFileRoute("/domains")({
 });
 
 function DomainsPage() {
-  const [list, setList] = useState<Domain[]>(seedDomains);
+  const { data: list, isLoading, isError, error } = useDomains();
+  const addDomain = useAddDomain();
+  const verifyDomain = useVerifyDomain();
+  const deleteDomain = useDeleteDomain();
+
   const [addOpen, setAddOpen] = useState(false);
   const [newDomain, setNewDomain] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [checks, setChecks] = useState<Record<string, string>>({});
   const [pendingDelete, setPendingDelete] = useState<Domain | null>(null);
 
-  function verify(d: Domain) {
-    const ok = d.status !== "failed";
-    setChecks((c) => ({
-      ...c,
-      [d.id]: ok
-        ? "MX ok · TXT ok — domain verified"
-        : "MX missing · TXT mismatch — check your DNS provider",
-    }));
-    if (ok) {
-      setList((prev) =>
-        prev.map((x) =>
-          x.id === d.id
-            ? { ...x, status: "verified", isActive: true, verifiedAt: new Date().toISOString() }
-            : x,
-        ),
-      );
-    }
-  }
+  const domains = list ?? [];
 
   return (
     <AppShell
@@ -79,7 +75,17 @@ function DomainsPage() {
           description="Use the shared shieldme.cc domain instantly, or bring your own and prove ownership with two DNS records."
         />
 
-        {list.length === 0 ? (
+        {isLoading ? (
+          <Panel>
+            <p className="py-10 text-center text-sm text-neutral-400">Loading domains…</p>
+          </Panel>
+        ) : isError ? (
+          <Panel>
+            <p className="py-10 text-center text-sm text-rose-600">
+              Couldn't load domains: {error instanceof Error ? error.message : "unknown error"}
+            </p>
+          </Panel>
+        ) : domains.length === 0 ? (
           <Panel>
             <EmptyState
               title="No domains yet"
@@ -88,74 +94,29 @@ function DomainsPage() {
           </Panel>
         ) : (
           <div className="space-y-3">
-            {list.map((d) => (
-              <div key={d.id} className="bg-neutral-50 ring-1 ring-black/5 rounded-xl">
-                <div className="p-5 flex flex-wrap items-center gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-sm font-medium">{d.domain}</span>
-                      {d.isShared ? <Chip>Shared</Chip> : null}
-                      <StatusPill
-                        tone={
-                          d.status === "verified"
-                            ? "emerald"
-                            : d.status === "pending"
-                              ? "amber"
-                              : "rose"
-                        }
-                      >
-                        {d.status === "verified"
-                          ? "Verified"
-                          : d.status === "pending"
-                            ? "Pending"
-                            : "Failed"}
-                      </StatusPill>
-                    </div>
-                    <p className="mt-1 text-xs text-neutral-400">
-                      {d.isShared
-                        ? "Ready to use — no DNS setup required"
-                        : d.verifiedAt
-                          ? `Verified ${formatDate(d.verifiedAt)} · DKIM selector ${d.dkimSelector}`
-                          : `Added ${formatDate(d.createdAt)} · awaiting DNS propagation`}
-                    </p>
-                    {checks[d.id] ? (
-                      <p
-                        className={`mt-2 text-xs font-mono ${
-                          checks[d.id].includes("missing") ? "text-rose-600" : "text-emerald-600"
-                        }`}
-                      >
-                        {checks[d.id]}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {!d.isShared ? (
-                      <>
-                        <Btn onClick={() => setExpanded(expanded === d.id ? null : d.id)}>
-                          {expanded === d.id ? "Hide DNS" : "Show DNS"}
-                        </Btn>
-                        <Btn onClick={() => verify(d)}>Verify</Btn>
-                        <Btn variant="danger" onClick={() => setPendingDelete(d)}>
-                          <Trash2 className="size-3.5" />
-                        </Btn>
-                      </>
-                    ) : (
-                      <Chip tone="emerald">Managed</Chip>
-                    )}
-                  </div>
-                </div>
-
-                {expanded === d.id && !d.isShared ? (
-                  <div className="border-t border-neutral-200/60 p-5 space-y-6">
-                    <RecordGroup title="Required records" records={d.dnsRecords.required} />
-                    <RecordGroup
-                      title="Recommended for deliverability"
-                      records={d.dnsRecords.optional}
-                    />
-                  </div>
-                ) : null}
-              </div>
+            {domains.map((d) => (
+              <DomainRow
+                key={d.id}
+                domain={d}
+                expanded={expanded === d.id}
+                check={checks[d.id]}
+                onToggleExpanded={() => setExpanded(expanded === d.id ? null : d.id)}
+                onVerify={() => {
+                  verifyDomain.mutate(d.id, {
+                    onSuccess: () =>
+                      setChecks((c) => ({
+                        ...c,
+                        [d.id]: "Verify request accepted — check status",
+                      })),
+                    onError: (err) =>
+                      setChecks((c) => ({
+                        ...c,
+                        [d.id]: err instanceof Error ? err.message : "Verification failed",
+                      })),
+                  });
+                }}
+                onDelete={() => setPendingDelete(d)}
+              />
             ))}
           </div>
         )}
@@ -175,63 +136,26 @@ function DomainsPage() {
               placeholder="example.com"
             />
           </Field>
+          {addDomain.isError ? (
+            <p className="text-xs text-rose-600">
+              {addDomain.error instanceof Error ? addDomain.error.message : "Add failed"}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Btn onClick={() => setAddOpen(false)}>Cancel</Btn>
             <Btn
               variant="primary"
-              disabled={!newDomain.trim()}
-              onClick={() => {
-                const id = `dom_${Math.random().toString(36).slice(2, 7)}`;
-                const selector = `sm${list.length + 1}`;
-                setList((prev) => [
-                  ...prev,
-                  {
-                    id,
-                    domain: newDomain.trim(),
-                    status: "pending",
-                    isActive: false,
-                    isShared: false,
-                    dkimSelector: selector,
-                    verifiedAt: null,
-                    createdAt: new Date().toISOString(),
-                    dnsRecords: {
-                      required: [
-                        {
-                          type: "MX",
-                          name: newDomain.trim(),
-                          value: "inbound.shieldme.cc",
-                          priority: 10,
-                          note: "Routes inbound mail into the ShieldMail filter pipeline.",
-                        },
-                        {
-                          type: "TXT",
-                          name: `_shieldme.${newDomain.trim()}`,
-                          value: `shieldme-verify=${selector}-${Math.random().toString(16).slice(2, 12)}`,
-                          note: "Ownership proof. Keep this record permanently.",
-                        },
-                      ],
-                      optional: [
-                        {
-                          type: "TXT",
-                          name: newDomain.trim(),
-                          value: "v=spf1 include:spf.shieldme.cc ~all",
-                          note: "SPF — authorises ShieldMail to send on your behalf.",
-                        },
-                        {
-                          type: "TXT",
-                          name: `_dmarc.${newDomain.trim()}`,
-                          value: "v=DMARC1; p=quarantine; rua=mailto:dmarc@shieldme.cc",
-                          note: "DMARC — reporting and policy enforcement.",
-                        },
-                      ],
-                    },
+              disabled={!newDomain.trim() || addDomain.isPending}
+              onClick={() =>
+                addDomain.mutate(newDomain.trim(), {
+                  onSuccess: () => {
+                    setNewDomain("");
+                    setAddOpen(false);
                   },
-                ]);
-                setNewDomain("");
-                setAddOpen(false);
-              }}
+                })
+              }
             >
-              Add domain
+              {addDomain.isPending ? "Adding…" : "Add domain"}
             </Btn>
           </div>
         </div>
@@ -240,11 +164,85 @@ function DomainsPage() {
       <ConfirmDialog
         open={pendingDelete !== null}
         onClose={() => setPendingDelete(null)}
-        onConfirm={() => setList((prev) => prev.filter((x) => x.id !== pendingDelete?.id))}
+        onConfirm={() => {
+          if (pendingDelete) deleteDomain.mutate(pendingDelete.id);
+        }}
         title="Delete this domain?"
         description={`Every alias on ${pendingDelete?.domain} will stop receiving mail immediately.`}
       />
     </AppShell>
+  );
+}
+
+function DomainRow({
+  domain: d,
+  expanded,
+  check,
+  onToggleExpanded,
+  onVerify,
+  onDelete,
+}: {
+  domain: Domain;
+  expanded: boolean;
+  check?: string;
+  onToggleExpanded: () => void;
+  onVerify: () => void;
+  onDelete: () => void;
+}) {
+  const { data: detail } = useDomain(expanded && !d.isShared ? d.id : "");
+  const records = detail?.dnsRecords;
+
+  return (
+    <div className="bg-neutral-50 ring-1 ring-black/5 rounded-xl">
+      <div className="p-5 flex flex-wrap items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-sm font-medium">{d.domain}</span>
+            {d.isShared ? <Chip>Shared</Chip> : null}
+            <StatusPill
+              tone={d.status === "verified" ? "emerald" : d.status === "pending" ? "amber" : "rose"}
+            >
+              {d.status === "verified" ? "Verified" : d.status === "pending" ? "Pending" : "Failed"}
+            </StatusPill>
+          </div>
+          <p className="mt-1 text-xs text-neutral-400">
+            {d.isShared
+              ? "Ready to use — no DNS setup required"
+              : d.verifiedAt
+                ? `Verified ${formatDate(d.verifiedAt)}${d.dkimSelector ? ` · DKIM selector ${d.dkimSelector}` : ""}`
+                : `Added ${formatDate(d.createdAt)} · awaiting DNS propagation`}
+          </p>
+          {check ? <p className="mt-2 text-xs font-mono text-rose-600">{check}</p> : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {!d.isShared ? (
+            <>
+              <Btn onClick={onToggleExpanded}>{expanded ? "Hide DNS" : "Show DNS"}</Btn>
+              <Btn onClick={onVerify}>Verify</Btn>
+              <Btn variant="danger" onClick={onDelete}>
+                <Trash2 className="size-3.5" />
+              </Btn>
+            </>
+          ) : (
+            <Chip tone="emerald">Managed</Chip>
+          )}
+        </div>
+      </div>
+
+      {expanded && !d.isShared ? (
+        <div className="border-t border-neutral-200/60 p-5 space-y-6">
+          {records ? (
+            <>
+              <RecordGroup title="Required records" records={records.required} />
+              <RecordGroup title="Recommended for deliverability" records={records.optional} />
+            </>
+          ) : (
+            <p className="text-xs text-neutral-400">Loading DNS records…</p>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -264,9 +262,7 @@ function RecordGroup({ title, records }: { title: string; records: DnsRecord[] }
               <p className="text-[10px] uppercase tracking-widest text-neutral-400">Type</p>
               <p className="font-mono text-xs mt-0.5">
                 {r.type}
-                {r.priority ? (
-                  <span className="text-neutral-400"> · prio {r.priority}</span>
-                ) : null}
+                {r.priority ? <span className="text-neutral-400"> · prio {r.priority}</span> : null}
               </p>
             </div>
             <div className="min-w-0">

@@ -17,13 +17,19 @@ import {
   Toggle,
 } from "@/components/ui-kit";
 import {
-  aliases as seedAliases,
-  domains,
+  useAliases,
+  useAliasStats,
+  useCreateAlias,
+  useDeleteAlias,
+  useDomains,
+  useRecipients,
+  useSetAliasPgp,
+  useToggleAlias,
+  useVerificationCode,
   formatDate,
-  recipients,
-  type Alias,
   type PgpMode,
-} from "@/lib/mock-data";
+  type Alias,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/aliases")({
   head: () => ({
@@ -63,16 +69,27 @@ function randomSuffix() {
 }
 
 function AliasesPage() {
-  const [list, setList] = useState<Alias[]>(seedAliases);
+  const { data: aliases, isLoading, isError, error } = useAliases();
+  const { data: stats } = useAliasStats();
+  const { data: domains } = useDomains();
+  const { data: recipients } = useRecipients();
+
+  const createAlias = useCreateAlias();
+  const toggleAlias = useToggleAlias();
+  const setPgp = useSetAliasPgp();
+  const deleteAlias = useDeleteAlias();
+  const revealCode = useVerificationCode();
+
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState("newest");
   const [pgpFilter, setPgpFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Alias | null>(null);
-  const [revealed, setRevealed] = useState<string | null>(null);
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [revealError, setRevealError] = useState<Record<string, string>>({});
 
-  const verifiedDomains = domains.filter((d) => d.status === "verified");
-  const verifiedRecipients = recipients.filter((r) => r.status === "verified");
+  const verifiedDomains = (domains ?? []).filter((d) => d.status === "verified");
+  const verifiedRecipients = (recipients ?? []).filter((r) => r.status === "verified");
 
   const [label, setLabel] = useState("");
   const [localPart, setLocalPart] = useState(`alias.${randomSuffix()}`);
@@ -80,59 +97,75 @@ function AliasesPage() {
   const [recipientId, setRecipientId] = useState(verifiedRecipients[0]?.id ?? "");
   const [pgpMode, setPgpMode] = useState<PgpMode>("optional");
 
+  const statsFor = (id: string) =>
+    stats?.perAlias?.[id] ?? {
+      forwarded: 0,
+      blocked: 0,
+      failed: 0,
+      spamTagged: 0,
+      spamRejected: 0,
+    };
+
+  const list = useMemo(() => aliases ?? [], [aliases]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     let out = list.filter(
       (a) =>
         !q ||
-        `${a.localPart}@${a.domain}`.toLowerCase().includes(q) ||
-        a.recipientEmail.toLowerCase().includes(q) ||
-        a.label.toLowerCase().includes(q),
+        `${a.localPart}@${a.domain.domain}`.toLowerCase().includes(q) ||
+        a.recipient.email.toLowerCase().includes(q),
     );
     if (pgpFilter !== "all") out = out.filter((a) => a.pgpMode === pgpFilter);
     return [...out].sort((a, b) => {
-      if (sort === "forwarded") return b.stats.forwarded - a.stats.forwarded;
+      if (sort === "forwarded")
+        return (
+          (stats?.perAlias?.[b.id]?.forwarded ?? 0) - (stats?.perAlias?.[a.id]?.forwarded ?? 0)
+        );
       const da = new Date(a.createdAt).getTime();
       const db = new Date(b.createdAt).getTime();
       return sort === "oldest" ? da - db : db - da;
     });
-  }, [list, query, sort, pgpFilter]);
+  }, [list, query, sort, pgpFilter, stats]);
 
   const activeCount = list.filter((a) => a.status === "active").length;
   const pgpRequired = list.filter((a) => a.pgpMode === "required").length;
 
-  function createAlias() {
-    const domain = verifiedDomains.find((d) => d.id === domainId);
-    const recipient = verifiedRecipients.find((r) => r.id === recipientId);
-    if (!domain || !recipient) return;
-    const id = `als_${Math.random().toString(36).slice(2, 7)}`;
-    setList((prev) => [
+  function handleCreate() {
+    if (!domainId || !recipientId) return;
+    createAlias.mutate(
+      { localPart, domainId, recipientId, pgpMode },
       {
-        id,
-        label: label || "Untitled",
-        localPart,
-        domainId: domain.id,
-        domain: domain.domain,
-        recipientId: recipient.id,
-        recipientEmail: recipient.email,
-        status: "active",
-        pgpMode,
-        verificationCode: `SM-${id.slice(-3).toUpperCase()}-${localPart.slice(-4).toUpperCase()}`,
-        createdAt: new Date().toISOString(),
-        stats: { forwarded: 0, blocked: 0, failed: 0, spamTagged: 0, spamRejected: 0 },
+        onSuccess: () => {
+          setCreateOpen(false);
+          setLabel("");
+          setLocalPart(`alias.${randomSuffix()}`);
+        },
       },
-      ...prev,
-    ]);
-    setCreateOpen(false);
-    setLabel("");
-    setLocalPart(`alias.${randomSuffix()}`);
+    );
+  }
+
+  function handleReveal(alias: Alias) {
+    if (revealed[alias.id]) return;
+    revealCode.mutate(alias.id, {
+      onSuccess: (r) => setRevealed((m) => ({ ...m, [alias.id]: r.verificationCode })),
+      onError: () =>
+        setRevealError((m) => ({
+          ...m,
+          [alias.id]: "Verification codes are disabled on this instance.",
+        })),
+    });
   }
 
   return (
     <AppShell
       eyebrow="Aliases"
       action={
-        <Btn variant="primary" onClick={() => setCreateOpen(true)} className="text-sm py-2 px-3">
+        <Btn
+          variant="primary"
+          onClick={() => setCreateOpen(true)}
+          className="text-sm py-2 px-3"
+          disabled={!verifiedDomains.length || !verifiedRecipients.length}
+        >
           <Plus className="size-3.5" /> Create alias
         </Btn>
       }
@@ -179,7 +212,7 @@ function AliasesPage() {
 
         <div className="flex flex-wrap items-center gap-3 mb-4">
           <TextInput
-            placeholder="Search address, label, or recipient"
+            placeholder="Search address or recipient"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="max-w-xs"
@@ -204,114 +237,127 @@ function AliasesPage() {
           </span>
         </div>
 
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <Panel>
+            <p className="py-10 text-center text-sm text-neutral-400">Loading aliases…</p>
+          </Panel>
+        ) : isError ? (
+          <Panel>
+            <p className="py-10 text-center text-sm text-rose-600">
+              Couldn't load aliases: {error instanceof Error ? error.message : "unknown error"}
+            </p>
+          </Panel>
+        ) : filtered.length === 0 ? (
           <Panel>
             <EmptyState
               title={list.length === 0 ? "No aliases yet" : "No aliases match your search"}
               description={
                 list.length === 0
                   ? "Create your first alias to start shielding your real inbox."
-                  : "Try a different address, label, or PGP filter."
+                  : "Try a different address or PGP filter."
               }
             />
           </Panel>
         ) : (
           <div className="space-y-3">
-            {filtered.map((a) => (
-              <div key={a.id} className="bg-neutral-50 ring-1 ring-black/5 rounded-xl p-5">
-                <div className="flex flex-wrap items-start gap-4">
-                  <Toggle
-                    checked={a.status === "active"}
-                    label={`Toggle ${a.localPart}`}
-                    onChange={(v) =>
-                      setList((prev) =>
-                        prev.map((x) =>
-                          x.id === a.id ? { ...x, status: v ? "active" : "disabled" } : x,
-                        ),
-                      )
-                    }
-                  />
+            {filtered.map((a) => {
+              const s = statsFor(a.id);
+              const code = revealed[a.id];
+              return (
+                <div key={a.id} className="bg-neutral-50 ring-1 ring-black/5 rounded-xl p-5">
+                  <div className="flex flex-wrap items-start gap-4">
+                    <Toggle
+                      checked={a.status === "active"}
+                      label={`Toggle ${a.localPart}`}
+                      onChange={(v) => toggleAlias.mutate({ id: a.id, enable: v })}
+                    />
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`font-mono text-sm font-medium ${
-                          a.status === "active" ? "text-neutral-900" : "text-neutral-400"
-                        }`}
-                      >
-                        {a.localPart}@{a.domain}
-                      </span>
-                      <Chip tone={a.pgpMode === "required" ? "brand" : "neutral"}>
-                        {PGP_LABEL[a.pgpMode]}
-                      </Chip>
-                      <CopyButton value={`${a.localPart}@${a.domain}`} />
-                    </div>
-                    <p className="mt-1 text-xs text-neutral-400 flex items-center gap-1.5">
-                      <span>{a.label}</span>
-                      <ArrowRight className="size-3" />
-                      <span>{a.recipientEmail}</span>
-                      <span className="text-neutral-300">· created {formatDate(a.createdAt)}</span>
-                    </p>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px] font-mono text-neutral-500">
-                      <Stat icon={<Mail className="size-3" />} label="Forwarded" value={a.stats.forwarded} />
-                      <Stat icon={<Ban className="size-3" />} label="Blocked" value={a.stats.blocked} />
-                      {a.stats.failed > 0 ? (
-                        <Link
-                          to="/failed-deliveries"
-                          className="inline-flex items-center gap-1.5 text-rose-600 hover:underline underline-offset-4"
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`font-mono text-sm font-medium ${
+                            a.status === "active" ? "text-neutral-900" : "text-neutral-400"
+                          }`}
                         >
-                          <TriangleAlert className="size-3" />
-                          Failures {a.stats.failed}
-                        </Link>
-                      ) : (
-                        <Stat icon={<TriangleAlert className="size-3" />} label="Failures" value={0} />
-                      )}
-                      <Stat
-                        icon={<ShieldCheck className="size-3" />}
-                        label="Spam"
-                        value={a.stats.spamTagged + a.stats.spamRejected}
-                      />
-                      <span className="text-neutral-300">
-                        {a.stats.spamTagged} tagged · {a.stats.spamRejected} rejected
-                      </span>
+                          {a.localPart}@{a.domain.domain}
+                        </span>
+                        <Chip tone={a.pgpMode === "required" ? "brand" : "neutral"}>
+                          {PGP_LABEL[a.pgpMode]}
+                        </Chip>
+                        <CopyButton value={`${a.localPart}@${a.domain.domain}`} />
+                      </div>
+                      <p className="mt-1 text-xs text-neutral-400 flex items-center gap-1.5">
+                        <ArrowRight className="size-3" />
+                        <span>{a.recipient.email}</span>
+                        <span className="text-neutral-300">
+                          · created {formatDate(a.createdAt)}
+                        </span>
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[11px] font-mono text-neutral-500">
+                        <Stat
+                          icon={<Mail className="size-3" />}
+                          label="Forwarded"
+                          value={s.forwarded}
+                        />
+                        <Stat icon={<Ban className="size-3" />} label="Blocked" value={s.blocked} />
+                        {s.failed > 0 ? (
+                          <Link
+                            to="/failed-deliveries"
+                            className="inline-flex items-center gap-1.5 text-rose-600 hover:underline underline-offset-4"
+                          >
+                            <TriangleAlert className="size-3" />
+                            Failures {s.failed}
+                          </Link>
+                        ) : (
+                          <Stat
+                            icon={<TriangleAlert className="size-3" />}
+                            label="Failures"
+                            value={0}
+                          />
+                        )}
+                        <Stat
+                          icon={<ShieldCheck className="size-3" />}
+                          label="Spam"
+                          value={s.spamTagged + s.spamRejected}
+                        />
+                        <span className="text-neutral-300">
+                          {s.spamTagged} tagged · {s.spamRejected} rejected
+                        </span>
+                      </div>
+
+                      {code ? (
+                        <div className="mt-3 flex items-center gap-2 bg-white ring-1 ring-black/5 rounded-md px-2.5 py-1.5 w-fit">
+                          <span className="font-mono text-xs">{code}</span>
+                          <CopyButton value={code} label="Copy" />
+                        </div>
+                      ) : revealError[a.id] ? (
+                        <p className="mt-3 text-xs text-neutral-400">{revealError[a.id]}</p>
+                      ) : null}
                     </div>
 
-                    {revealed === a.id ? (
-                      <div className="mt-3 flex items-center gap-2 bg-white ring-1 ring-black/5 rounded-md px-2.5 py-1.5 w-fit">
-                        <span className="font-mono text-xs">{a.verificationCode}</span>
-                        <CopyButton value={a.verificationCode} label="Copy" />
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <SelectInput
-                      aria-label={`PGP mode for ${a.localPart}`}
-                      value={a.pgpMode}
-                      onChange={(e) =>
-                        setList((prev) =>
-                          prev.map((x) =>
-                            x.id === a.id ? { ...x, pgpMode: e.target.value as PgpMode } : x,
-                          ),
-                        )
-                      }
-                      className="w-36 text-xs"
-                    >
-                      <option value="none">No PGP</option>
-                      <option value="optional">PGP optional</option>
-                      <option value="required">PGP required</option>
-                    </SelectInput>
-                    <Btn onClick={() => setRevealed(revealed === a.id ? null : a.id)}>
-                      {revealed === a.id ? "Hide code" : "Show code"}
-                    </Btn>
-                    <Btn variant="danger" onClick={() => setPendingDelete(a)}>
-                      <Trash2 className="size-3.5" />
-                    </Btn>
+                    <div className="flex items-center gap-2">
+                      <SelectInput
+                        aria-label={`PGP mode for ${a.localPart}`}
+                        value={a.pgpMode}
+                        onChange={(e) =>
+                          setPgp.mutate({ id: a.id, pgpMode: e.target.value as PgpMode })
+                        }
+                        className="w-36 text-xs"
+                      >
+                        <option value="none">No PGP</option>
+                        <option value="optional">PGP optional</option>
+                        <option value="required">PGP required</option>
+                      </SelectInput>
+                      <Btn onClick={() => handleReveal(a)}>{code ? "Hide code" : "Show code"}</Btn>
+                      <Btn variant="danger" onClick={() => setPendingDelete(a)}>
+                        <Trash2 className="size-3.5" />
+                      </Btn>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -323,7 +369,10 @@ function AliasesPage() {
         description="Aliases route inbound mail to a verified recipient."
       >
         <div className="space-y-4">
-          <Field label="Service label" hint="Only you see this — it helps you find the alias later.">
+          <Field
+            label="Service label"
+            hint="Only you see this — it helps you find the alias later."
+          >
             <TextInput
               value={label}
               onChange={(e) => setLabel(e.target.value)}
@@ -338,7 +387,7 @@ function AliasesPage() {
           </Field>
           <Field label="Domain">
             <SelectInput value={domainId} onChange={(e) => setDomainId(e.target.value)}>
-              {verifiedDomains.map((d) => (
+              {(verifiedDomains.length ? verifiedDomains : (domains ?? [])).map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.domain}
                   {d.isShared ? " — shared" : ""}
@@ -348,7 +397,7 @@ function AliasesPage() {
           </Field>
           <Field label="Forward to">
             <SelectInput value={recipientId} onChange={(e) => setRecipientId(e.target.value)}>
-              {verifiedRecipients.map((r) => (
+              {(verifiedRecipients.length ? verifiedRecipients : (recipients ?? [])).map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.email}
                 </option>
@@ -356,19 +405,21 @@ function AliasesPage() {
             </SelectInput>
           </Field>
           <Field label="PGP encryption" hint={PGP_HELP[pgpMode]}>
-            <SelectInput
-              value={pgpMode}
-              onChange={(e) => setPgpMode(e.target.value as PgpMode)}
-            >
+            <SelectInput value={pgpMode} onChange={(e) => setPgpMode(e.target.value as PgpMode)}>
               <option value="none">No PGP</option>
               <option value="optional">PGP optional</option>
               <option value="required">PGP required</option>
             </SelectInput>
           </Field>
+          {createAlias.isError ? (
+            <p className="text-xs text-rose-600">
+              {createAlias.error instanceof Error ? createAlias.error.message : "Create failed"}
+            </p>
+          ) : null}
           <div className="flex justify-end gap-2 pt-1">
             <Btn onClick={() => setCreateOpen(false)}>Cancel</Btn>
-            <Btn variant="primary" onClick={createAlias}>
-              Create alias
+            <Btn variant="primary" onClick={handleCreate} disabled={createAlias.isPending}>
+              {createAlias.isPending ? "Creating…" : "Create alias"}
             </Btn>
           </div>
         </div>
@@ -377,9 +428,11 @@ function AliasesPage() {
       <ConfirmDialog
         open={pendingDelete !== null}
         onClose={() => setPendingDelete(null)}
-        onConfirm={() => setList((prev) => prev.filter((x) => x.id !== pendingDelete?.id))}
+        onConfirm={() => {
+          if (pendingDelete) deleteAlias.mutate(pendingDelete.id);
+        }}
         title="Delete this alias?"
-        description={`Mail sent to ${pendingDelete?.localPart}@${pendingDelete?.domain} will bounce immediately. This cannot be undone.`}
+        description={`Mail sent to ${pendingDelete?.localPart}@${pendingDelete?.domain?.domain} will bounce immediately. This cannot be undone.`}
       />
     </AppShell>
   );
@@ -412,4 +465,3 @@ function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; va
     </span>
   );
 }
-

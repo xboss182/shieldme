@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Ban, MailWarning, RefreshCw, ThumbsDown, TriangleAlert } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import {
@@ -12,15 +13,21 @@ import {
   Table,
   Th,
 } from "@/components/ui-kit";
-import { DELIVERY_ERROR_LABELS, failedDeliveries, formatDateTime } from "@/lib/mock-data";
+import { DELIVERY_ERROR_LABELS, useFailedDeliveries, formatDateTime } from "@/lib/api";
 
 export const Route = createFileRoute("/failed-deliveries")({
   head: () => ({
     meta: [
       { title: "Failed Deliveries — ShieldMail" },
-      { name: "description", content: "Inspect bounced, rejected, and complained ShieldMail forwards." },
+      {
+        name: "description",
+        content: "Inspect bounced, rejected, and complained ShieldMail forwards.",
+      },
       { property: "og:title", content: "Failed Deliveries — ShieldMail" },
-      { property: "og:description", content: "Inspect bounced, rejected, and complained ShieldMail forwards." },
+      {
+        property: "og:description",
+        content: "Inspect bounced, rejected, and complained ShieldMail forwards.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -44,12 +51,11 @@ const CARDS = [
 
 function FailedDeliveriesPage() {
   const [filter, setFilter] = useState<string>("all");
-  const [spinning, setSpinning] = useState(false);
+  const qc = useQueryClient();
+  const { data: rows, isLoading, isError, error } = useFailedDeliveries(filter);
 
-  const rows = useMemo(
-    () => failedDeliveries.filter((d) => filter === "all" || d.status === filter),
-    [filter],
-  );
+  const deliveries = rows ?? [];
+  const countFor = (key: string) => deliveries.filter((d) => d.status === key).length;
 
   return (
     <AppShell
@@ -57,12 +63,9 @@ function FailedDeliveriesPage() {
       action={
         <Btn
           className="text-sm py-2 px-3"
-          onClick={() => {
-            setSpinning(true);
-            setTimeout(() => setSpinning(false), 900);
-          }}
+          onClick={() => void qc.invalidateQueries({ queryKey: ["failed-deliveries"] })}
         >
-          <RefreshCw className={`size-3.5 ${spinning ? "animate-spin" : ""}`} /> Refresh
+          <RefreshCw className="size-3.5" /> Refresh
         </Btn>
       }
     >
@@ -88,7 +91,7 @@ function FailedDeliveriesPage() {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           {CARDS.map((c) => {
-            const count = failedDeliveries.filter((d) => d.status === c.key).length;
+            const count = countFor(c.key);
             const active = filter === c.key;
             return (
               <button
@@ -109,12 +112,14 @@ function FailedDeliveriesPage() {
           })}
         </div>
 
-        <Panel
-          title="Delivery log"
-          meta={`${rows.length} of ${failedDeliveries.length} events`}
-          padded={false}
-        >
-          {rows.length === 0 ? (
+        <Panel title="Delivery log" meta={`${deliveries.length} events`} padded={false}>
+          {isLoading ? (
+            <p className="py-10 text-center text-sm text-neutral-400">Loading deliveries…</p>
+          ) : isError ? (
+            <p className="py-10 text-center text-sm text-rose-600">
+              Couldn't load deliveries: {error instanceof Error ? error.message : "unknown error"}
+            </p>
+          ) : deliveries.length === 0 ? (
             <EmptyState
               title="No failed deliveries"
               description={
@@ -136,7 +141,7 @@ function FailedDeliveriesPage() {
                 </>
               }
             >
-              {rows.map((d) => (
+              {deliveries.map((d) => (
                 <tr key={d.id}>
                   <td className="px-6 py-3">
                     <StatusPill tone={STATUS_TONE[d.status]}>{d.status}</StatusPill>
