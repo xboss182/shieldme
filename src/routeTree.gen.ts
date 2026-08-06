@@ -9,312 +9,133 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as V2RouteImport } from './routes/v2'
-import { Route as UpgradesRouteImport } from './routes/upgrades'
-import { Route as VerifyRouteImport } from './routes/verify'
-import { Route as SecurityRouteImport } from './routes/security'
-import { Route as PrivacyRouteImport } from './routes/privacy'
-import { Route as MailSecurityRouteImport } from './routes/mail-security'
-import { Route as AuthRouteImport } from './routes/_auth'
-import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as AuthRegisterRouteImport } from './routes/_auth.register'
-import { Route as AuthLoginRouteImport } from './routes/_auth.login'
-import { Route as AppSubscriptionRouteImport } from './routes/_app.subscription'
-import { Route as AppSettingsRouteImport } from './routes/_app.settings'
-import { Route as AppRecipientsRouteImport } from './routes/_app.recipients'
-import { Route as AppFailedDeliveriesRouteImport } from './routes/_app.failed-deliveries'
-import { Route as AppDomainsRouteImport } from './routes/_app.domains'
-import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
-import { Route as AppAliasesRouteImport } from './routes/_app.aliases'
-import { Route as AppAdminRouteImport } from './routes/_app.admin'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AliasesRouteImport } from './routes/aliases'
+import { Route as DomainsRouteImport } from './routes/domains'
+import { Route as FailedDeliveriesRouteImport } from './routes/failed-deliveries'
+import { Route as RecipientsRouteImport } from './routes/recipients'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SubscriptionRouteImport } from './routes/subscription'
 
-const V2Route = V2RouteImport.update({
-  id: '/v2',
-  path: '/v2',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const UpgradesRoute = UpgradesRouteImport.update({
-  id: '/upgrades',
-  path: '/upgrades',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const VerifyRoute = VerifyRouteImport.update({
-  id: '/verify',
-  path: '/verify',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SecurityRoute = SecurityRouteImport.update({
-  id: '/security',
-  path: '/security',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PrivacyRoute = PrivacyRouteImport.update({
-  id: '/privacy',
-  path: '/privacy',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MailSecurityRoute = MailSecurityRouteImport.update({
-  id: '/mail-security',
-  path: '/mail-security',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/_auth',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthRegisterRoute = AuthRegisterRouteImport.update({
-  id: '/register',
-  path: '/register',
-  getParentRoute: () => AuthRoute,
-} as any)
-const AuthLoginRoute = AuthLoginRouteImport.update({
-  id: '/login',
-  path: '/login',
-  getParentRoute: () => AuthRoute,
-} as any)
-const AppSubscriptionRoute = AppSubscriptionRouteImport.update({
-  id: '/subscription',
-  path: '/subscription',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppRecipientsRoute = AppRecipientsRouteImport.update({
-  id: '/recipients',
-  path: '/recipients',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppFailedDeliveriesRoute = AppFailedDeliveriesRouteImport.update({
-  id: '/failed-deliveries',
-  path: '/failed-deliveries',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDomainsRoute = AppDomainsRouteImport.update({
-  id: '/domains',
-  path: '/domains',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAliasesRoute = AppAliasesRouteImport.update({
-  id: '/aliases',
-  path: '/aliases',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAdminRoute = AppAdminRouteImport.update({
+const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
-  getParentRoute: () => AppRoute,
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AliasesRoute = AliasesRouteImport.update({
+  id: '/aliases',
+  path: '/aliases',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DomainsRoute = DomainsRouteImport.update({
+  id: '/domains',
+  path: '/domains',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FailedDeliveriesRoute = FailedDeliveriesRouteImport.update({
+  id: '/failed-deliveries',
+  path: '/failed-deliveries',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RecipientsRoute = RecipientsRouteImport.update({
+  id: '/recipients',
+  path: '/recipients',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SubscriptionRoute = SubscriptionRouteImport.update({
+  id: '/subscription',
+  path: '/subscription',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/mail-security': typeof MailSecurityRoute
-  '/privacy': typeof PrivacyRoute
-  '/security': typeof SecurityRoute
-  '/upgrades': typeof UpgradesRoute
-  '/verify': typeof VerifyRoute
-  '/v2': typeof V2Route
-  '/admin': typeof AppAdminRoute
-  '/aliases': typeof AppAliasesRoute
-  '/dashboard': typeof AppDashboardRoute
-  '/domains': typeof AppDomainsRoute
-  '/failed-deliveries': typeof AppFailedDeliveriesRoute
-  '/recipients': typeof AppRecipientsRoute
-  '/settings': typeof AppSettingsRoute
-  '/subscription': typeof AppSubscriptionRoute
-  '/login': typeof AuthLoginRoute
-  '/register': typeof AuthRegisterRoute
+  '/admin': typeof AdminRoute
+  '/aliases': typeof AliasesRoute
+  '/domains': typeof DomainsRoute
+  '/failed-deliveries': typeof FailedDeliveriesRoute
+  '/recipients': typeof RecipientsRoute
+  '/settings': typeof SettingsRoute
+  '/subscription': typeof SubscriptionRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/mail-security': typeof MailSecurityRoute
-  '/privacy': typeof PrivacyRoute
-  '/security': typeof SecurityRoute
-  '/upgrades': typeof UpgradesRoute
-  '/verify': typeof VerifyRoute
-  '/v2': typeof V2Route
-  '/admin': typeof AppAdminRoute
-  '/aliases': typeof AppAliasesRoute
-  '/dashboard': typeof AppDashboardRoute
-  '/domains': typeof AppDomainsRoute
-  '/failed-deliveries': typeof AppFailedDeliveriesRoute
-  '/recipients': typeof AppRecipientsRoute
-  '/settings': typeof AppSettingsRoute
-  '/subscription': typeof AppSubscriptionRoute
-  '/login': typeof AuthLoginRoute
-  '/register': typeof AuthRegisterRoute
+  '/admin': typeof AdminRoute
+  '/aliases': typeof AliasesRoute
+  '/domains': typeof DomainsRoute
+  '/failed-deliveries': typeof FailedDeliveriesRoute
+  '/recipients': typeof RecipientsRoute
+  '/settings': typeof SettingsRoute
+  '/subscription': typeof SubscriptionRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/_app': typeof AppRouteWithChildren
-  '/_auth': typeof AuthRouteWithChildren
-  '/mail-security': typeof MailSecurityRoute
-  '/privacy': typeof PrivacyRoute
-  '/security': typeof SecurityRoute
-  '/upgrades': typeof UpgradesRoute
-  '/verify': typeof VerifyRoute
-  '/v2': typeof V2Route
-  '/_app/admin': typeof AppAdminRoute
-  '/_app/aliases': typeof AppAliasesRoute
-  '/_app/dashboard': typeof AppDashboardRoute
-  '/_app/domains': typeof AppDomainsRoute
-  '/_app/failed-deliveries': typeof AppFailedDeliveriesRoute
-  '/_app/recipients': typeof AppRecipientsRoute
-  '/_app/settings': typeof AppSettingsRoute
-  '/_app/subscription': typeof AppSubscriptionRoute
-  '/_auth/login': typeof AuthLoginRoute
-  '/_auth/register': typeof AuthRegisterRoute
+  '/admin': typeof AdminRoute
+  '/aliases': typeof AliasesRoute
+  '/domains': typeof DomainsRoute
+  '/failed-deliveries': typeof FailedDeliveriesRoute
+  '/recipients': typeof RecipientsRoute
+  '/settings': typeof SettingsRoute
+  '/subscription': typeof SubscriptionRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/mail-security'
-    | '/privacy'
-    | '/security'
-    | '/upgrades'
-    | '/verify'
-    | '/v2'
     | '/admin'
     | '/aliases'
-    | '/dashboard'
     | '/domains'
     | '/failed-deliveries'
     | '/recipients'
     | '/settings'
     | '/subscription'
-    | '/login'
-    | '/register'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/mail-security'
-    | '/privacy'
-    | '/security'
-    | '/upgrades'
-    | '/verify'
-    | '/v2'
     | '/admin'
     | '/aliases'
-    | '/dashboard'
     | '/domains'
     | '/failed-deliveries'
     | '/recipients'
     | '/settings'
     | '/subscription'
-    | '/login'
-    | '/register'
   id:
     | '__root__'
     | '/'
-    | '/_app'
-    | '/_auth'
-    | '/mail-security'
-    | '/privacy'
-    | '/security'
-    | '/upgrades'
-    | '/verify'
-    | '/v2'
-    | '/_app/admin'
-    | '/_app/aliases'
-    | '/_app/dashboard'
-    | '/_app/domains'
-    | '/_app/failed-deliveries'
-    | '/_app/recipients'
-    | '/_app/settings'
-    | '/_app/subscription'
-    | '/_auth/login'
-    | '/_auth/register'
+    | '/admin'
+    | '/aliases'
+    | '/domains'
+    | '/failed-deliveries'
+    | '/recipients'
+    | '/settings'
+    | '/subscription'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  AppRoute: typeof AppRouteWithChildren
-  AuthRoute: typeof AuthRouteWithChildren
-  MailSecurityRoute: typeof MailSecurityRoute
-  PrivacyRoute: typeof PrivacyRoute
-  SecurityRoute: typeof SecurityRoute
-  UpgradesRoute: typeof UpgradesRoute
-  VerifyRoute: typeof VerifyRoute
-  V2Route: typeof V2Route
+  AdminRoute: typeof AdminRoute
+  AliasesRoute: typeof AliasesRoute
+  DomainsRoute: typeof DomainsRoute
+  FailedDeliveriesRoute: typeof FailedDeliveriesRoute
+  RecipientsRoute: typeof RecipientsRoute
+  SettingsRoute: typeof SettingsRoute
+  SubscriptionRoute: typeof SubscriptionRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/v2': {
-      id: '/v2'
-      path: '/v2'
-      fullPath: '/v2'
-      preLoaderRoute: typeof V2RouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/upgrades': {
-      id: '/upgrades'
-      path: '/upgrades'
-      fullPath: '/upgrades'
-      preLoaderRoute: typeof UpgradesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/verify': {
-      id: '/verify'
-      path: '/verify'
-      fullPath: '/verify'
-      preLoaderRoute: typeof VerifyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/security': {
-      id: '/security'
-      path: '/security'
-      fullPath: '/security'
-      preLoaderRoute: typeof SecurityRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/privacy': {
-      id: '/privacy'
-      path: '/privacy'
-      fullPath: '/privacy'
-      preLoaderRoute: typeof PrivacyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/mail-security': {
-      id: '/mail-security'
-      path: '/mail-security'
-      fullPath: '/mail-security'
-      preLoaderRoute: typeof MailSecurityRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_auth': {
-      id: '/_auth'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AuthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app': {
-      id: '/_app'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -322,125 +143,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_auth/register': {
-      id: '/_auth/register'
-      path: '/register'
-      fullPath: '/register'
-      preLoaderRoute: typeof AuthRegisterRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_auth/login': {
-      id: '/_auth/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof AuthLoginRouteImport
-      parentRoute: typeof AuthRoute
-    }
-    '/_app/subscription': {
-      id: '/_app/subscription'
-      path: '/subscription'
-      fullPath: '/subscription'
-      preLoaderRoute: typeof AppSubscriptionRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/settings': {
-      id: '/_app/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/recipients': {
-      id: '/_app/recipients'
-      path: '/recipients'
-      fullPath: '/recipients'
-      preLoaderRoute: typeof AppRecipientsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/failed-deliveries': {
-      id: '/_app/failed-deliveries'
-      path: '/failed-deliveries'
-      fullPath: '/failed-deliveries'
-      preLoaderRoute: typeof AppFailedDeliveriesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/domains': {
-      id: '/_app/domains'
-      path: '/domains'
-      fullPath: '/domains'
-      preLoaderRoute: typeof AppDomainsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/aliases': {
-      id: '/_app/aliases'
-      path: '/aliases'
-      fullPath: '/aliases'
-      preLoaderRoute: typeof AppAliasesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/admin': {
-      id: '/_app/admin'
+    '/admin': {
+      id: '/admin'
       path: '/admin'
       fullPath: '/admin'
-      preLoaderRoute: typeof AppAdminRouteImport
-      parentRoute: typeof AppRoute
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/aliases': {
+      id: '/aliases'
+      path: '/aliases'
+      fullPath: '/aliases'
+      preLoaderRoute: typeof AliasesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/domains': {
+      id: '/domains'
+      path: '/domains'
+      fullPath: '/domains'
+      preLoaderRoute: typeof DomainsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/failed-deliveries': {
+      id: '/failed-deliveries'
+      path: '/failed-deliveries'
+      fullPath: '/failed-deliveries'
+      preLoaderRoute: typeof FailedDeliveriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/recipients': {
+      id: '/recipients'
+      path: '/recipients'
+      fullPath: '/recipients'
+      preLoaderRoute: typeof RecipientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/subscription': {
+      id: '/subscription'
+      path: '/subscription'
+      fullPath: '/subscription'
+      preLoaderRoute: typeof SubscriptionRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
 
-interface AppRouteChildren {
-  AppAdminRoute: typeof AppAdminRoute
-  AppAliasesRoute: typeof AppAliasesRoute
-  AppDashboardRoute: typeof AppDashboardRoute
-  AppDomainsRoute: typeof AppDomainsRoute
-  AppFailedDeliveriesRoute: typeof AppFailedDeliveriesRoute
-  AppRecipientsRoute: typeof AppRecipientsRoute
-  AppSettingsRoute: typeof AppSettingsRoute
-  AppSubscriptionRoute: typeof AppSubscriptionRoute
-}
-
-const AppRouteChildren: AppRouteChildren = {
-  AppAdminRoute: AppAdminRoute,
-  AppAliasesRoute: AppAliasesRoute,
-  AppDashboardRoute: AppDashboardRoute,
-  AppDomainsRoute: AppDomainsRoute,
-  AppFailedDeliveriesRoute: AppFailedDeliveriesRoute,
-  AppRecipientsRoute: AppRecipientsRoute,
-  AppSettingsRoute: AppSettingsRoute,
-  AppSubscriptionRoute: AppSubscriptionRoute,
-}
-
-const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
-
-interface AuthRouteChildren {
-  AuthLoginRoute: typeof AuthLoginRoute
-  AuthRegisterRoute: typeof AuthRegisterRoute
-}
-
-const AuthRouteChildren: AuthRouteChildren = {
-  AuthLoginRoute: AuthLoginRoute,
-  AuthRegisterRoute: AuthRegisterRoute,
-}
-
-const AuthRouteWithChildren = AuthRoute._addFileChildren(AuthRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  AppRoute: AppRouteWithChildren,
-  AuthRoute: AuthRouteWithChildren,
-  MailSecurityRoute: MailSecurityRoute,
-  PrivacyRoute: PrivacyRoute,
-  SecurityRoute: SecurityRoute,
-  UpgradesRoute: UpgradesRoute,
-  VerifyRoute: VerifyRoute,
-  V2Route: V2Route,
+  AdminRoute: AdminRoute,
+  AliasesRoute: AliasesRoute,
+  DomainsRoute: DomainsRoute,
+  FailedDeliveriesRoute: FailedDeliveriesRoute,
+  RecipientsRoute: RecipientsRoute,
+  SettingsRoute: SettingsRoute,
+  SubscriptionRoute: SubscriptionRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
